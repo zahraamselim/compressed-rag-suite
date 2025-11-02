@@ -37,6 +37,58 @@ class ContextRetriever:
         self.similarity_threshold = config.get('similarity_threshold', 0.0)
         self.rerank = config.get('rerank', False)
         self.diversity_penalty = config.get('diversity_penalty', 0.0)
+        
+        # Get distance metric from vector store
+        self.distance_metric = self._get_distance_metric()
+        logger.info(f"Using distance metric: {self.distance_metric}")
+    
+    def _get_distance_metric(self) -> str:
+        """Get the distance metric used by the vector store."""
+        try:
+            if self.vector_store.collection:
+                metadata = self.vector_store.collection.metadata
+                return metadata.get('hnsw:space', 'cosine')
+        except:
+            pass
+        return 'cosine'  # Default
+    
+    def _distance_to_similarity(self, distance: float) -> float:
+        """
+        Convert distance to similarity score [0, 1].
+        
+        ChromaDB distance ranges:
+        - cosine: L2 distance in [0, 2] where 0=identical, 2=opposite
+        - l2: Euclidean distance in [0, inf]
+        - ip (inner product): Negative dot product in [-inf, inf]
+        
+        Args:
+            distance: Distance from vector store
+            
+        Returns:
+            Similarity score in [0, 1] where 1=most similar
+        """
+        if self.distance_metric == 'cosine':
+            # For cosine space, ChromaDB returns L2 distance of normalized vectors
+            # L2(a,b) = sqrt(2 - 2*cos(θ)) for normalized vectors
+            # So: cos(θ) = 1 - (L2^2 / 2)
+            # Clamp distance to [0, 2] and convert
+            distance = max(0.0, min(2.0, distance))
+            similarity = 1.0 - (distance / 2.0)
+            return max(0.0, min(1.0, similarity))
+        
+        elif self.distance_metric == 'l2':
+            # For L2 distance, use exponential decay
+            # similarity ≈ 1 / (1 + distance)
+            return 1.0 / (1.0 + distance)
+        
+        elif self.distance_metric == 'ip':
+            # Inner product: higher (less negative) is better
+            # Normalize to [0, 1] assuming range [-2, 0] for normalized vectors
+            return max(0.0, min(1.0, (distance + 2.0) / 2.0))
+        
+        else:
+            logger.warning(f"Unknown distance metric: {self.distance_metric}, using default conversion")
+            return max(0.0, 1.0 - (distance / 2.0))
     
     def retrieve(
         self,
@@ -53,7 +105,7 @@ class ContextRetriever:
             filters: Metadata filters
             
         Returns:
-            List of dicts with 'text', 'score', 'metadata', 'chunk_id'
+            List of dicts with 'text', 'score', 'distance', 'metadata', 'chunk_id'
         """
         k = top_k or self.top_k
         
@@ -76,16 +128,13 @@ class ContextRetriever:
             # Format results
             retrieved_chunks = []
             for i in range(len(results['ids'][0])):
-                # Convert distance to similarity score
-                # ChromaDB with cosine space returns L2 distance in range [0, 2]
-                # For cosine similarity: similarity = 1 - (distance / 2)
                 distance = results['distances'][0][i]
-                similarity_score = 1.0 - (distance / 2.0)  # More explicit conversion
+                similarity_score = self._distance_to_similarity(distance)
                 
                 chunk_data = {
                     'text': results['documents'][0][i],
-                    'score': max(0.0, min(1.0, similarity_score)),  # Clamp to [0, 1]
-                    'distance': distance,  # Keep original distance for reference
+                    'score': similarity_score,
+                    'distance': distance,
                     'metadata': results['metadatas'][0][i] if results['metadatas'] else {},
                     'chunk_id': results['ids'][0][i]
                 }
@@ -140,8 +189,7 @@ class ContextRetriever:
     
     def _rerank(self, query: str, chunks: List[Dict], top_k: int) -> List[Dict]:
         """
-        Simple re-ranking based on token overlap.
-        More sophisticated methods can use cross-encoders.
+        Re-ranking using BM25-style token overlap + semantic similarity.
         
         Args:
             query: Query string
@@ -155,10 +203,13 @@ class ContextRetriever:
         
         for chunk in chunks:
             chunk_tokens = set(chunk['text'].lower().split())
-            overlap = len(query_tokens & chunk_tokens)
             
-            # Combine with original score
+            # Token overlap (BM25-like)
+            overlap = len(query_tokens & chunk_tokens)
             overlap_score = overlap / max(len(query_tokens), 1)
+            
+            # Combine with original semantic similarity
+            # 70% semantic, 30% lexical
             chunk['rerank_score'] = chunk['score'] * 0.7 + overlap_score * 0.3
         
         # Sort by rerank score
@@ -167,7 +218,9 @@ class ContextRetriever:
     
     def _apply_diversity(self, chunks: List[Dict]) -> List[Dict]:
         """
-        Apply maximal marginal relevance (MMR) for diversity.
+        Apply Maximal Marginal Relevance (MMR) for diversity using embeddings.
+        
+        MMR = λ * Similarity(query, chunk) - (1-λ) * max(Similarity(chunk, selected))
         
         Args:
             chunks: List of chunk dicts
@@ -178,37 +231,46 @@ class ContextRetriever:
         if len(chunks) <= 1:
             return chunks
         
-        # Simple diversity: penalize chunks that are too similar to already selected ones
-        selected = [chunks[0]]
-        remaining = chunks[1:].copy()
+        # Lambda parameter (similarity vs diversity tradeoff)
+        lambda_param = 1.0 - self.diversity_penalty  # diversity_penalty in [0, 1]
         
-        while len(selected) < len(chunks) and remaining:
-            best_chunk = None
+        # Embed all chunks for similarity comparison
+        chunk_texts = [c['text'] for c in chunks]
+        chunk_embeddings = self.embedding_model.embed(chunk_texts)
+        
+        # Start with highest scoring chunk
+        selected = [chunks[0]]
+        selected_embeddings = [chunk_embeddings[0]]
+        remaining_indices = list(range(1, len(chunks)))
+        
+        while len(selected) < len(chunks) and remaining_indices:
+            best_idx = None
             best_score = -float('inf')
             
-            for chunk in remaining:
-                # Calculate similarity to selected chunks
-                chunk_text_set = set(chunk['text'].lower().split())
-                max_sim = 0.0
+            for idx in remaining_indices:
+                # Original relevance score
+                relevance = chunks[idx]['score']
                 
-                for sel_chunk in selected:
-                    sel_text_set = set(sel_chunk['text'].lower().split())
-                    union_size = len(chunk_text_set | sel_text_set)
-                    if union_size > 0:
-                        overlap = len(chunk_text_set & sel_text_set)
-                        sim = overlap / union_size
-                        max_sim = max(max_sim, sim)
+                # Calculate max similarity to already selected chunks
+                max_sim = 0.0
+                for sel_emb in selected_embeddings:
+                    # Cosine similarity between embeddings
+                    sim = np.dot(chunk_embeddings[idx], sel_emb) / (
+                        np.linalg.norm(chunk_embeddings[idx]) * np.linalg.norm(sel_emb)
+                    )
+                    max_sim = max(max_sim, sim)
                 
                 # MMR score
-                mmr_score = chunk['score'] - self.diversity_penalty * max_sim
+                mmr_score = lambda_param * relevance - (1 - lambda_param) * max_sim
                 
                 if mmr_score > best_score:
                     best_score = mmr_score
-                    best_chunk = chunk
+                    best_idx = idx
             
-            if best_chunk:
-                selected.append(best_chunk)
-                remaining.remove(best_chunk)
+            if best_idx is not None:
+                selected.append(chunks[best_idx])
+                selected_embeddings.append(chunk_embeddings[best_idx])
+                remaining_indices.remove(best_idx)
             else:
                 break
         

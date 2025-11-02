@@ -2,6 +2,7 @@
 
 import logging
 import re
+from typing import List, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class RAGGenerator:
         query: str,
         context: str,
         return_prompt: bool = False
-    ) -> str:
+    ) -> Union[str, Tuple[str, str]]:
         """
         Generate answer given query and context.
         
@@ -72,6 +73,47 @@ class RAGGenerator:
             return answer, prompt
         return answer
     
+    def generate_batch(
+        self,
+        queries: List[str],
+        contexts: List[str],
+        show_progress: bool = True
+    ) -> List[str]:
+        """
+        Generate answers for multiple queries in batch.
+        
+        Note: Current implementation processes sequentially.
+        True batch processing requires model-specific implementation.
+        
+        Args:
+            queries: List of questions
+            contexts: List of contexts (one per query)
+            show_progress: Show progress indicator
+            
+        Returns:
+            List of generated answers
+        """
+        if len(queries) != len(contexts):
+            raise ValueError(f"Queries ({len(queries)}) and contexts ({len(contexts)}) must have same length")
+        
+        answers = []
+        
+        if show_progress:
+            try:
+                from tqdm import tqdm
+                iterator = tqdm(zip(queries, contexts), total=len(queries), desc="Generating answers")
+            except ImportError:
+                iterator = zip(queries, contexts)
+                logger.warning("tqdm not available, progress bar disabled")
+        else:
+            iterator = zip(queries, contexts)
+        
+        for query, context in iterator:
+            answer = self.generate(query, context)
+            answers.append(answer)
+        
+        return answers
+    
     def generate_without_context(self, query: str) -> str:
         """
         Generate answer without RAG context.
@@ -97,6 +139,39 @@ class RAGGenerator:
         )
         
         return self._clean_answer(answer)
+    
+    def generate_batch_without_context(
+        self,
+        queries: List[str],
+        show_progress: bool = True
+    ) -> List[str]:
+        """
+        Generate answers for multiple queries without context.
+        
+        Args:
+            queries: List of questions
+            show_progress: Show progress indicator
+            
+        Returns:
+            List of generated answers
+        """
+        answers = []
+        
+        if show_progress:
+            try:
+                from tqdm import tqdm
+                iterator = tqdm(queries, desc="Generating no-RAG answers")
+            except ImportError:
+                iterator = queries
+                logger.warning("tqdm not available, progress bar disabled")
+        else:
+            iterator = queries
+        
+        for query in iterator:
+            answer = self.generate_without_context(query)
+            answers.append(answer)
+        
+        return answers
     
     def _format_instruct_prompt(self, query: str, context: str) -> str:
         """Format prompt for instruct models."""
@@ -128,7 +203,7 @@ Answer:"""
                     add_generation_prompt=True
                 )
             except Exception as e:
-                logger.warning(f"Chat template failed: {e}")
+                logger.warning(f"Chat template failed: {e}, using fallback format")
         
         # Fallback format
         return f"""Answer the question using the context below.
@@ -163,8 +238,8 @@ Answer:"""
                     tokenize=False,
                     add_generation_prompt=True
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Chat template failed: {e}, using fallback")
         
         return f"Question: {query}\n\nAnswer:"
     
@@ -173,18 +248,34 @@ Answer:"""
         return f"Question: {query}\n\nAnswer:"
     
     def _clean_answer(self, answer: str, max_sentences: int = 5) -> str:
-        """Clean and normalize generated answer."""
+        """
+        Clean and normalize generated answer.
+        
+        Args:
+            answer: Raw generated text
+            max_sentences: Maximum sentences to keep
+            
+        Returns:
+            Cleaned answer
+        """
         if not answer or answer.lower() in ['', 'none', 'n/a']:
             return "Not mentioned in the provided context"
         
         # Remove excessive whitespace
         answer = re.sub(r'\s+', ' ', answer).strip()
         
+        # Remove common artifacts
+        answer = re.sub(r'^(Answer:|A:)\s*', '', answer, flags=re.IGNORECASE)
+        answer = answer.strip()
+        
         # Truncate to max sentences
         sentences = re.split(r'[.!?]+', answer)
         sentences = [s.strip() for s in sentences if s.strip()]
         
         if len(sentences) > max_sentences:
-            answer = '. '.join(sentences[:max_sentences]) + '.'
+            answer = '. '.join(sentences[:max_sentences])
+            # Add period if not present
+            if not answer.endswith('.'):
+                answer += '.'
         
         return answer

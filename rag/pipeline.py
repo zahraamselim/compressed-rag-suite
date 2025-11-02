@@ -158,7 +158,7 @@ class RAGPipeline:
             top_k: Number of chunks to retrieve
             
         Returns:
-            List of context dicts with 'text', 'score', 'metadata', 'id'
+            List of context dicts with 'text', 'score', 'metadata', 'chunk_id'
         """
         return self.retriever.retrieve(query, top_k=top_k)
     
@@ -235,14 +235,16 @@ class RAGPipeline:
     def evaluate(
         self,
         test_questions: List[Dict[str, str]],
-        compare_no_rag: bool = True
+        compare_no_rag: bool = True,
+        show_progress: bool = True
     ) -> Dict:
         """
-        Evaluate RAG system on test questions.
+        Evaluate RAG system on test questions using batch generation.
         
         Args:
             test_questions: List of {'question': ..., 'answer': ...}
             compare_no_rag: Whether to compare with no-RAG baseline
+            show_progress: Show progress bars
             
         Returns:
             Dict with predictions and optionally no-RAG predictions
@@ -252,36 +254,59 @@ class RAGPipeline:
         questions = [qa['question'] for qa in test_questions]
         references = [qa['answer'] for qa in test_questions]
         
-        # Generate RAG answers
-        predictions = []
+        # Retrieve contexts for all questions
+        logger.info("Retrieving contexts...")
         contexts = []
+        contexts_list = []  # List of retrieved chunks for each question
         
         for q in questions:
-            result = self.query(q, return_context=True)
-            predictions.append(result['answer'])
-            contexts.append(result['context'])
+            retrieved = self.retriever.retrieve(q)
+            contexts_list.append(retrieved)
+            context_str = '\n\n'.join([chunk['text'] for chunk in retrieved])
+            contexts.append(context_str)
+        
+        # Generate RAG answers in batch
+        logger.info("Generating RAG answers...")
+        predictions = self.generator.generate_batch(
+            queries=questions,
+            contexts=contexts,
+            show_progress=show_progress
+        )
         
         # Generate no-RAG answers if needed
         predictions_no_rag = None
         if compare_no_rag:
             logger.info("Generating no-RAG baseline answers...")
-            predictions_no_rag = [
-                self.generator.generate_without_context(q)
-                for q in questions
-            ]
+            predictions_no_rag = self.generator.generate_batch_without_context(
+                queries=questions,
+                show_progress=show_progress
+            )
         
         return {
             'questions': questions,
             'references': references,
             'predictions': predictions,
             'contexts': contexts,
+            'retrieved_chunks': contexts_list,
             'predictions_no_rag': predictions_no_rag
         }
     
     def get_stats(self) -> Dict:
         """Get pipeline statistics."""
-        return {
+        stats = {
             'vector_store': self.vector_store.get_stats() if self.vector_store else {},
             'embedding_dim': self.embedding_model.get_dimension() if self.embedding_model else None,
             'config': self.config
         }
+        
+        # Add retriever stats
+        if self.retriever:
+            stats['retrieval'] = {
+                'top_k': self.retriever.top_k,
+                'similarity_threshold': self.retriever.similarity_threshold,
+                'rerank': self.retriever.rerank,
+                'diversity_penalty': self.retriever.diversity_penalty,
+                'distance_metric': self.retriever.distance_metric
+            }
+        
+        return stats
