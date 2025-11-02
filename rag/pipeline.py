@@ -299,6 +299,16 @@ class RAGPipeline:
             'config': self.config
         }
         
+        # Add embedding info
+        if self.embedding_model:
+            stats['embedding'] = {
+                'model_name': self.embedding_model.model_name,
+                'dimension': self.embedding_model.get_dimension(),
+                'device': self.embedding_model.device,
+                'batch_size': self.embedding_model.batch_size,
+                'normalize': self.embedding_model.normalize
+            }
+        
         # Add retriever stats
         if self.retriever:
             stats['retrieval'] = {
