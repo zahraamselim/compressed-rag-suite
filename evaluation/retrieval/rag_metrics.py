@@ -6,7 +6,6 @@ from collections import Counter
 
 logger = logging.getLogger(__name__)
 
-# Check numpy availability
 try:
     import numpy as np
     NUMPY_AVAILABLE = True
@@ -17,56 +16,85 @@ except ImportError:
 
 class RAGMetrics:
     """
-    Evaluate end-to-end RAG performance
-    - Exact Match, F1 Score
-    - ROUGE scores
-    - BERTScore
-    - Answer quality metrics
+    Evaluate end-to-end RAG performance.
+    All parameters configurable via config.
     """
     
-    def __init__(self):
+    def __init__(self, config: dict = None):
+        """
+        Initialize RAG metrics with configuration.
+        
+        Args:
+            config: Retrieval evaluation config from config.json
+        """
         if not NUMPY_AVAILABLE:
-            raise ImportError("NumPy is required for RAG metrics. Install with: pip install numpy")
+            raise ImportError("NumPy required for RAG metrics")
+        
+        self.config = config or {}
+        
+        # Configurable parameters
+        self.normalize_whitespace = self.config.get('normalize_whitespace', True)
+        self.case_sensitive = self.config.get('case_sensitive', False)
+        self.remove_punctuation = self.config.get('remove_punctuation', False)
+        self.faithfulness_method = self.config.get('faithfulness_method', 'token_containment')
+        self.relevance_method = self.config.get('relevance_method', 'token_overlap')
+        
         self._check_dependencies()
     
     def _check_dependencies(self):
-        """Check for optional metric libraries"""
+        """Check for optional metric libraries."""
+        # ROUGE
         try:
             from rouge_score import rouge_scorer
             self.rouge_scorer = rouge_scorer.RougeScorer(
                 ['rouge1', 'rouge2', 'rougeL'],
-                use_stemmer=True
+                use_stemmer=self.config.get('rouge_use_stemmer', True)
             )
             self.rouge_available = True
         except ImportError:
             self.rouge_available = False
             logger.warning("rouge-score not available. Install: pip install rouge-score")
         
+        # BERTScore
         try:
             from bert_score import score as bert_score
             self.bert_score_fn = bert_score
             self.bertscore_available = True
+            self.bertscore_lang = self.config.get('bertscore_lang', 'en')
+            self.bertscore_model = self.config.get('bertscore_model', None)  # Use default
         except ImportError:
             self.bertscore_available = False
             logger.warning("bert-score not available. Install: pip install bert-score")
     
-    @staticmethod
-    def exact_match(prediction: str, reference: str) -> float:
+    def _normalize_text(self, text: str) -> str:
+        """Normalize text based on configuration."""
+        if not self.case_sensitive:
+            text = text.lower()
+        
+        if self.normalize_whitespace:
+            text = ' '.join(text.strip().split())
+        
+        if self.remove_punctuation:
+            import string
+            text = text.translate(str.maketrans('', '', string.punctuation))
+        
+        return text
+    
+    def exact_match(self, prediction: str, reference: str) -> float:
         """
-        Exact Match: Binary score for exact string match (normalized)
+        Exact Match: Binary score for exact string match (normalized).
         """
-        pred_norm = ' '.join(prediction.lower().strip().split())
-        ref_norm = ' '.join(reference.lower().strip().split())
+        pred_norm = self._normalize_text(prediction)
+        ref_norm = self._normalize_text(reference)
         return float(pred_norm == ref_norm)
     
-    @staticmethod
-    def token_f1(prediction: str, reference: str) -> float:
+    def token_f1(self, prediction: str, reference: str) -> float:
         """
-        Token-level F1 score
-        Measures overlap between prediction and reference tokens
+        Token-level F1 score.
+        Measures overlap between prediction and reference tokens.
         """
-        pred_tokens = prediction.lower().split()
-        ref_tokens = reference.lower().split()
+        pred_tokens = self._normalize_text(prediction).split()
+        ref_tokens = self._normalize_text(reference).split()
         
         if len(pred_tokens) == 0 or len(ref_tokens) == 0:
             return 0.0
@@ -85,8 +113,8 @@ class RAGMetrics:
     
     def rouge_scores(self, prediction: str, reference: str) -> Dict[str, Optional[float]]:
         """
-        ROUGE scores (ROUGE-1, ROUGE-2, ROUGE-L)
-        Measures n-gram overlap
+        ROUGE scores (ROUGE-1, ROUGE-2, ROUGE-L).
+        Measures n-gram overlap.
         """
         if not self.rouge_available:
             return {'rouge1': None, 'rouge2': None, 'rougeL': None}
@@ -108,19 +136,21 @@ class RAGMetrics:
         references: List[str]
     ) -> Optional[Dict[str, float]]:
         """
-        BERTScore: Semantic similarity using BERT embeddings
-        Returns precision, recall, F1
+        BERTScore: Semantic similarity using BERT embeddings.
+        Returns precision, recall, F1.
         """
         if not self.bertscore_available or len(predictions) == 0:
             return None
         
         try:
-            P, R, F1 = self.bert_score_fn(
-                predictions,
-                references,
-                lang='en',
-                verbose=False
-            )
+            kwargs = {
+                'lang': self.bertscore_lang,
+                'verbose': False
+            }
+            if self.bertscore_model:
+                kwargs['model_type'] = self.bertscore_model
+            
+            P, R, F1 = self.bert_score_fn(predictions, references, **kwargs)
             return {
                 'precision': P.mean().item(),
                 'recall': R.mean().item(),
@@ -130,37 +160,47 @@ class RAGMetrics:
             logger.warning(f"BERTScore failed: {e}")
             return None
     
-    @staticmethod
-    def answer_relevance(answer: str, question: str) -> float:
+    def answer_relevance(self, answer: str, question: str) -> float:
         """
-        Measure how relevant the answer is to the question
-        Based on token overlap
-        """
-        answer_tokens = set(answer.lower().split())
-        question_tokens = set(question.lower().split())
+        Measure how relevant the answer is to the question.
         
-        if len(answer_tokens) == 0:
+        Methods:
+        - token_overlap: Token overlap ratio
+        - semantic: Would use embeddings (not implemented yet)
+        """
+        if self.relevance_method == 'token_overlap':
+            answer_tokens = set(self._normalize_text(answer).split())
+            question_tokens = set(self._normalize_text(question).split())
+            
+            if len(answer_tokens) == 0:
+                return 0.0
+            
+            common = answer_tokens & question_tokens
+            return len(common) / len(answer_tokens)
+        else:
+            logger.warning(f"Unknown relevance method: {self.relevance_method}")
             return 0.0
-        
-        common = answer_tokens & question_tokens
-        return len(common) / len(answer_tokens)
     
-    @staticmethod
-    def faithfulness_score(answer: str, context: str) -> float:
+    def faithfulness_score(self, answer: str, context: str) -> float:
         """
-        Measure how faithful the answer is to the context
-        (Does the answer only use information from context?)
-        Simple version: token containment
-        """
-        answer_tokens = set(answer.lower().split())
-        context_tokens = set(context.lower().split())
+        Measure how faithful the answer is to the context.
         
-        if len(answer_tokens) == 0:
+        Methods:
+        - token_containment: What fraction of answer tokens appear in context?
+        - entailment: Would use NLI model (not implemented yet)
+        """
+        if self.faithfulness_method == 'token_containment':
+            answer_tokens = set(self._normalize_text(answer).split())
+            context_tokens = set(self._normalize_text(context).split())
+            
+            if len(answer_tokens) == 0:
+                return 0.0
+            
+            contained = answer_tokens & context_tokens
+            return len(contained) / len(answer_tokens)
+        else:
+            logger.warning(f"Unknown faithfulness method: {self.faithfulness_method}")
             return 0.0
-        
-        # What fraction of answer tokens appear in context?
-        contained = answer_tokens & context_tokens
-        return len(contained) / len(answer_tokens)
     
     def evaluate_rag_system(
         self,
@@ -171,7 +211,7 @@ class RAGMetrics:
         predictions_no_rag: Optional[List[str]] = None
     ) -> Dict[str, float]:
         """
-        Comprehensive RAG evaluation
+        Comprehensive RAG evaluation.
         
         Args:
             questions: List of questions
@@ -183,6 +223,10 @@ class RAGMetrics:
         Returns:
             Dict with all metrics
         """
+        if len(questions) != len(predictions) or len(questions) != len(references):
+            raise ValueError(f"Length mismatch: questions={len(questions)}, "
+                           f"predictions={len(predictions)}, references={len(references)}")
+        
         results = {}
         
         # Basic metrics
@@ -193,9 +237,9 @@ class RAGMetrics:
         relevances = [self.answer_relevance(pred, q) 
                      for pred, q in zip(predictions, questions)]
         
-        results['exact_match'] = float(np.mean(exact_matches))
-        results['f1_score'] = float(np.mean(f1_scores))
-        results['answer_relevance'] = float(np.mean(relevances))
+        results['exact_match'] = float(np.mean(exact_matches)) if exact_matches else 0.0
+        results['f1_score'] = float(np.mean(f1_scores)) if f1_scores else 0.0
+        results['answer_relevance'] = float(np.mean(relevances)) if relevances else 0.0
         results['avg_answer_length'] = float(np.mean([len(p.split()) for p in predictions]))
         
         # ROUGE scores
@@ -203,7 +247,6 @@ class RAGMetrics:
             all_rouge = [self.rouge_scores(pred, ref) 
                         for pred, ref in zip(predictions, references)]
             
-            # Filter out None values before computing mean
             rouge1_values = [r['rouge1'] for r in all_rouge if r['rouge1'] is not None]
             rouge2_values = [r['rouge2'] for r in all_rouge if r['rouge2'] is not None]
             rougeL_values = [r['rougeL'] for r in all_rouge if r['rougeL'] is not None]
@@ -213,28 +256,35 @@ class RAGMetrics:
             results['rougeL'] = float(np.mean(rougeL_values)) if rougeL_values else None
         
         # BERTScore
-        bert_scores = self.bertscore(predictions, references)
-        if bert_scores:
-            results['bertscore_precision'] = bert_scores['precision']
-            results['bertscore_recall'] = bert_scores['recall']
-            results['bertscore_f1'] = bert_scores['f1']
+        if self.bertscore_available:
+            bert_scores = self.bertscore(predictions, references)
+            if bert_scores:
+                results['bertscore_precision'] = bert_scores['precision']
+                results['bertscore_recall'] = bert_scores['recall']
+                results['bertscore_f1'] = bert_scores['f1']
         
         # Faithfulness (if contexts provided)
         if contexts:
-            faithfulness_scores = [self.faithfulness_score(pred, ctx) 
-                                  for pred, ctx in zip(predictions, contexts)]
-            results['faithfulness'] = float(np.mean(faithfulness_scores))
+            if len(contexts) != len(predictions):
+                logger.warning(f"Context count ({len(contexts)}) != predictions ({len(predictions)})")
+            else:
+                faithfulness_scores = [self.faithfulness_score(pred, ctx) 
+                                      for pred, ctx in zip(predictions, contexts)]
+                results['faithfulness'] = float(np.mean(faithfulness_scores)) if faithfulness_scores else 0.0
         
-        # Comparison with no-RAG (if provided)
+        # Comparison with no-RAG
         if predictions_no_rag:
-            no_rag_f1 = [self.token_f1(pred, ref) 
-                        for pred, ref in zip(predictions_no_rag, references)]
-            no_rag_em = [self.exact_match(pred, ref) 
-                        for pred, ref in zip(predictions_no_rag, references)]
-            
-            results['no_rag_f1'] = float(np.mean(no_rag_f1))
-            results['no_rag_exact_match'] = float(np.mean(no_rag_em))
-            results['f1_improvement'] = results['f1_score'] - results['no_rag_f1']
-            results['em_improvement'] = results['exact_match'] - results['no_rag_exact_match']
+            if len(predictions_no_rag) != len(references):
+                logger.warning(f"No-RAG predictions count ({len(predictions_no_rag)}) != references ({len(references)})")
+            else:
+                no_rag_f1 = [self.token_f1(pred, ref) 
+                            for pred, ref in zip(predictions_no_rag, references)]
+                no_rag_em = [self.exact_match(pred, ref) 
+                            for pred, ref in zip(predictions_no_rag, references)]
+                
+                results['no_rag_f1'] = float(np.mean(no_rag_f1)) if no_rag_f1 else 0.0
+                results['no_rag_exact_match'] = float(np.mean(no_rag_em)) if no_rag_em else 0.0
+                results['f1_improvement'] = results['f1_score'] - results['no_rag_f1']
+                results['em_improvement'] = results['exact_match'] - results['no_rag_exact_match']
         
         return results
