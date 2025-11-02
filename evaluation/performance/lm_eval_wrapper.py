@@ -5,133 +5,166 @@ from typing import List, Dict, Optional, Union, Any
 
 logger = logging.getLogger(__name__)
 
-# Task registry with metadata
+# Comprehensive task registry with Mistral paper defaults
 TASK_REGISTRY = {
-    # Language Understanding
-    'lambada': {
-        'description': 'Language modeling task',
-        'metric': 'acc',
-        'default_fewshot': 0
-    },
-    'storycloze': {
-        'description': 'Story completion',
-        'metric': 'acc',
-        'default_fewshot': 0
-    },
-    
-    # Reasoning & Common Sense
-    'arc_easy': {
-        'description': 'AI2 Reasoning Challenge (Easy)',
-        'metric': 'acc_norm',
-        'default_fewshot': 0
-    },
-    'arc_challenge': {
-        'description': 'AI2 Reasoning Challenge (Challenge)',
-        'metric': 'acc_norm',
-        'default_fewshot': 25
-    },
-    'commonsense_qa': {
-        'description': 'CommonsenseQA',
-        'metric': 'acc',
-        'default_fewshot': 0
-    },
+    # Commonsense Reasoning (0-shot)
     'hellaswag': {
-        'description': 'HellaSwag commonsense reasoning',
+        'description': 'HellaSwag - sentence completion',
         'metric': 'acc_norm',
-        'default_fewshot': 10
-    },
-    'openbookqa': {
-        'description': 'OpenBookQA',
-        'metric': 'acc_norm',
-        'default_fewshot': 0
-    },
-    'piqa': {
-        'description': 'Physical Interaction QA',
-        'metric': 'acc_norm',
-        'default_fewshot': 0
-    },
-    'siqa': {
-        'description': 'Social Interaction QA',
-        'metric': 'acc',
-        'default_fewshot': 0
+        'default_fewshot': 0,
+        'category': 'commonsense'
     },
     'winogrande': {
-        'description': 'Winograd Schema Challenge',
+        'description': 'Winogrande - pronoun resolution',
         'metric': 'acc',
-        'default_fewshot': 5
+        'default_fewshot': 0,
+        'category': 'commonsense'
+    },
+    'piqa': {
+        'description': 'PIQA - physical interactions',
+        'metric': 'acc_norm',
+        'default_fewshot': 0,
+        'category': 'commonsense'
+    },
+    'siqa': {
+        'description': 'SIQA - social interactions',
+        'metric': 'acc',
+        'default_fewshot': 0,
+        'category': 'commonsense'
+    },
+    'openbookqa': {
+        'description': 'OpenBookQA - elementary science',
+        'metric': 'acc_norm',
+        'default_fewshot': 0,
+        'category': 'commonsense'
+    },
+    'arc_easy': {
+        'description': 'ARC-Easy - science questions',
+        'metric': 'acc_norm',
+        'default_fewshot': 0,
+        'category': 'commonsense'
+    },
+    'arc_challenge': {
+        'description': 'ARC-Challenge - hard science',
+        'metric': 'acc_norm',
+        'default_fewshot': 0,
+        'category': 'commonsense'
+    },
+    'commonsense_qa': {
+        'description': 'CommonsenseQA - general knowledge',
+        'metric': 'acc',
+        'default_fewshot': 0,
+        'category': 'commonsense'
     },
     
-    # Knowledge & QA
+    # World Knowledge (5-shot)
     'nq_open': {
-        'description': 'Natural Questions (Open)',
+        'description': 'Natural Questions - open domain',
         'metric': 'exact_match',
-        'default_fewshot': 0
+        'default_fewshot': 5,
+        'category': 'knowledge'
     },
     'triviaqa': {
-        'description': 'TriviaQA',
+        'description': 'TriviaQA - trivia questions',
         'metric': 'exact_match',
-        'default_fewshot': 5
+        'default_fewshot': 5,
+        'category': 'knowledge'
     },
     
-    # Comprehensive Benchmarks
-    'mmlu': {
-        'description': 'Massive Multitask Language Understanding',
-        'metric': 'acc',
-        'default_fewshot': 5
-    },
-    'bbh': {
-        'description': 'BIG-Bench Hard',
-        'metric': 'acc',
-        'default_fewshot': 3
-    },
-    'agieval': {
-        'description': 'AGIEval',
-        'metric': 'acc',
-        'default_fewshot': 0
-    },
-    
-    # GLUE & SuperGLUE
-    'glue': {
-        'description': 'GLUE benchmark (all tasks)',
-        'metric': 'acc',
-        'default_fewshot': 0
-    },
-    'super_glue': {
-        'description': 'SuperGLUE benchmark (all tasks)',
-        'metric': 'acc',
-        'default_fewshot': 0
-    },
+    # Reading Comprehension (0-shot)
     'boolq': {
-        'description': 'BoolQ (boolean questions)',
+        'description': 'BoolQ - boolean questions',
         'metric': 'acc',
-        'default_fewshot': 0
+        'default_fewshot': 0,
+        'category': 'reading'
+    },
+    'quac': {
+        'description': 'QuAC - conversational QA',
+        'metric': 'f1',
+        'default_fewshot': 0,
+        'category': 'reading'
     },
     
-    # Math & Code
+    # Math
     'gsm8k': {
-        'description': 'Grade School Math 8K',
+        'description': 'GSM8K - grade school math (maj@8)',
         'metric': 'exact_match',
-        'default_fewshot': 5
+        'default_fewshot': 8,
+        'category': 'math'
     },
     'hendrycks_math': {
-        'description': 'MATH dataset',
+        'description': 'MATH - competition math (maj@4)',
         'metric': 'exact_match',
-        'default_fewshot': 4
+        'default_fewshot': 4,
+        'category': 'math'
     },
     'math_algebra': {
         'description': 'MATH Algebra subset',
         'metric': 'exact_match',
-        'default_fewshot': 4
+        'default_fewshot': 4,
+        'category': 'math'
     },
+    
+    # Code (0-shot and 3-shot)
     'humaneval': {
-        'description': 'HumanEval code generation',
+        'description': 'HumanEval - Python code (pass@1)',
         'metric': 'pass@1',
-        'default_fewshot': 0
+        'default_fewshot': 0,
+        'category': 'code'
     },
     'mbpp': {
-        'description': 'Mostly Basic Python Problems',
+        'description': 'MBPP - Python problems',
         'metric': 'pass@1',
-        'default_fewshot': 3
+        'default_fewshot': 3,
+        'category': 'code'
+    },
+    
+    # Aggregate Benchmarks
+    'mmlu': {
+        'description': 'MMLU - multitask understanding (5-shot)',
+        'metric': 'acc',
+        'default_fewshot': 5,
+        'category': 'aggregate'
+    },
+    'bbh': {
+        'description': 'BBH - BIG-Bench Hard (3-shot)',
+        'metric': 'acc',
+        'default_fewshot': 3,
+        'category': 'aggregate'
+    },
+    'agieval': {
+        'description': 'AGI Eval - English MCQ (3-5 shot)',
+        'metric': 'acc',
+        'default_fewshot': 3,
+        'category': 'aggregate'
+    },
+    
+    # Language Understanding
+    'lambada': {
+        'description': 'LAMBADA - word prediction',
+        'metric': 'acc',
+        'default_fewshot': 0,
+        'category': 'language'
+    },
+    'storycloze': {
+        'description': 'StoryCloze - story completion',
+        'metric': 'acc',
+        'default_fewshot': 0,
+        'category': 'language'
+    },
+    
+    # NLP Benchmarks
+    'glue': {
+        'description': 'GLUE benchmark suite',
+        'metric': 'acc',
+        'default_fewshot': 0,
+        'category': 'nlp'
+    },
+    'super_glue': {
+        'description': 'SuperGLUE benchmark suite',
+        'metric': 'acc',
+        'default_fewshot': 0,
+        'category': 'nlp'
     }
 }
 
@@ -158,6 +191,7 @@ def parse_task_config(task_config: Union[bool, Dict[str, Any]]) -> Optional[Dict
 def get_metric_from_results(task_results: Dict[str, Any], task_name: str) -> Optional[float]:
     """
     Extract the appropriate metric from task results.
+    Handles various lm-eval output formats.
     
     Args:
         task_results: Results dictionary for a task
@@ -170,7 +204,7 @@ def get_metric_from_results(task_results: Dict[str, Any], task_name: str) -> Opt
     task_info = TASK_REGISTRY.get(task_name, {})
     preferred_metric = task_info.get('metric', 'acc')
     
-    # Priority order for metric names (with variations)
+    # Priority order for metric names (with common variations)
     metric_variations = [
         preferred_metric,
         f"{preferred_metric},none",
@@ -211,13 +245,14 @@ def get_metric_from_results(task_results: Dict[str, Any], task_name: str) -> Opt
                     logger.debug(f"Using fallback metric '{key}.{subkey}' for task {task_name}")
                     return float(value[subkey])
     
+    logger.warning(f"No valid metric found for {task_name}. Available keys: {list(task_results.keys())}")
     return None
 
 
 def run_lm_eval_harness(
     model_interface,
     tasks: Union[List[str], Dict[str, Any]],
-    num_fewshot: int = 0,
+    num_fewshot: Optional[int] = None,
     limit: Optional[int] = None,
     batch_size: int = 1
 ) -> Dict[str, float]:
@@ -227,22 +262,28 @@ def run_lm_eval_harness(
     Args:
         model_interface: ModelInterface instance
         tasks: Either list of task names or dict with task configs
-        num_fewshot: Default number of few-shot examples
+        num_fewshot: Default number of few-shot examples (None = use task defaults)
         limit: Limit number of samples per task
         batch_size: Batch size for evaluation
         
     Returns:
-        Dictionary mapping task names to scores
+        Dictionary mapping task names to scores (0.0 to 1.0)
     """
     try:
         # Try new API first (v0.4.0+)
         try:
             from lm_eval import simple_evaluate
             use_new_api = True
+            logger.debug("Using lm-eval API v0.4.0+")
         except ImportError:
             # Fall back to old API
-            from lm_eval import evaluator
-            use_new_api = False
+            try:
+                from lm_eval import evaluator
+                use_new_api = False
+                logger.debug("Using lm-eval API pre-v0.4.0")
+            except ImportError:
+                logger.error("lm-eval not installed. Install with: pip install lm-eval")
+                return {}
         
         # Parse tasks configuration
         task_list = []
@@ -267,33 +308,38 @@ def run_lm_eval_harness(
             logger.warning("No tasks enabled for evaluation")
             return {}
         
-        logger.info(f"Running lm-eval-harness for {len(task_list)} tasks: {task_list}")
-        logger.info(f"API version: {'new (v0.4.0+)' if use_new_api else 'old (pre-v0.4.0)'}")
+        logger.info(f"Running lm-eval for {len(task_list)} tasks")
         
         # Get lm-eval compatible model from interface
         lm_eval_model = model_interface.get_lm_eval_model()
         
         if lm_eval_model is None:
             logger.error("Model interface does not support lm-eval")
+            logger.error("Implement get_lm_eval_model() in your ModelInterface")
             return {}
         
-        # Run evaluation with appropriate API
+        # Run evaluation - process tasks individually for better error handling
         all_metrics = {}
         
-        # Process tasks individually or in groups
         for task_name in task_list:
             try:
                 # Get task-specific configuration
                 task_cfg = task_configs.get(task_name, {})
-                task_fewshot = task_cfg.get('num_fewshot', num_fewshot)
+                
+                # Determine few-shot setting
+                if 'num_fewshot' in task_cfg:
+                    task_fewshot = task_cfg['num_fewshot']
+                elif num_fewshot is not None:
+                    task_fewshot = num_fewshot
+                else:
+                    # Use registry default
+                    task_info = TASK_REGISTRY.get(task_name, {})
+                    task_fewshot = task_info.get('default_fewshot', 0)
+                
                 task_limit = task_cfg.get('limit', limit)
                 task_batch = task_cfg.get('batch_size', batch_size)
                 
-                # Use default fewshot from registry if not specified
-                if task_fewshot == 0 and task_name in TASK_REGISTRY:
-                    task_fewshot = TASK_REGISTRY[task_name].get('default_fewshot', 0)
-                
-                logger.info(f"Evaluating {task_name} (fewshot={task_fewshot})")
+                logger.info(f"Evaluating {task_name} ({task_fewshot}-shot)")
                 
                 # Run evaluation
                 if use_new_api:
@@ -315,19 +361,23 @@ def run_lm_eval_harness(
                     )
                 
                 # Extract metrics for this task
-                if task_name in results.get("results", {}):
-                    task_results = results["results"][task_name]
+                if 'results' in results and task_name in results['results']:
+                    task_results = results['results'][task_name]
                     score = get_metric_from_results(task_results, task_name)
                     
                     if score is not None:
                         all_metrics[task_name] = score
-                        logger.info(f"✓ {task_name}: {score:.4f}")
+                        logger.info(f"  ✓ {task_name}: {score:.4f} ({score*100:.2f}%)")
                     else:
-                        logger.warning(f"✗ {task_name}: No valid metric found")
-                        logger.debug(f"Available results: {list(task_results.keys())}")
+                        logger.warning(f"  ✗ {task_name}: No valid metric found")
+                else:
+                    logger.warning(f"  ✗ {task_name}: No results returned")
                 
             except Exception as e:
-                logger.error(f"Error evaluating task {task_name}: {e}")
+                logger.error(f"  ✗ {task_name} failed: {e}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    import traceback
+                    traceback.print_exc()
                 continue
         
         if not all_metrics:
@@ -338,22 +388,25 @@ def run_lm_eval_harness(
         return all_metrics
         
     except ImportError as e:
-        logger.error(f"lm-eval not installed or incompatible version: {e}")
+        logger.error(f"lm-eval not installed or incompatible: {e}")
         logger.error("Install with: pip install lm-eval")
         return {}
     except Exception as e:
-        logger.error(f"Error running lm-eval-harness: {e}", exc_info=True)
+        logger.error(f"Error running lm-eval-harness: {e}")
+        if logger.isEnabledFor(logging.DEBUG):
+            import traceback
+            traceback.print_exc()
         return {}
 
 
-def list_available_tasks() -> Dict[str, str]:
+def list_available_tasks() -> Dict[str, Dict[str, Any]]:
     """
-    Get list of all supported tasks with descriptions.
+    Get list of all supported tasks with full info.
     
     Returns:
-        Dictionary mapping task names to descriptions
+        Dictionary mapping task names to task info
     """
-    return {task: info['description'] for task, info in TASK_REGISTRY.items()}
+    return TASK_REGISTRY.copy()
 
 
 def get_task_info(task_name: str) -> Optional[Dict[str, Any]]:
@@ -367,3 +420,43 @@ def get_task_info(task_name: str) -> Optional[Dict[str, Any]]:
         Task information dict or None if not found
     """
     return TASK_REGISTRY.get(task_name)
+
+
+def get_tasks_by_category(category: str) -> List[str]:
+    """
+    Get all tasks in a category.
+    
+    Args:
+        category: Category name ('commonsense', 'knowledge', 'math', etc.)
+        
+    Returns:
+        List of task names in that category
+    """
+    return [
+        task_name for task_name, info in TASK_REGISTRY.items()
+        if info.get('category') == category
+    ]
+
+
+def get_mistral_baseline_tasks() -> List[str]:
+    """
+    Get the tasks used in the Mistral 7B baseline evaluation.
+    
+    Returns:
+        List of task names
+    """
+    return [
+        # Commonsense (0-shot)
+        'hellaswag', 'winogrande', 'piqa', 'siqa', 
+        'openbookqa', 'arc_easy', 'arc_challenge', 'commonsense_qa',
+        # Knowledge (5-shot)
+        'nq_open', 'triviaqa',
+        # Reading (0-shot)
+        'boolq', 'quac',
+        # Math
+        'gsm8k', 'hendrycks_math',
+        # Code
+        'humaneval', 'mbpp',
+        # Aggregate
+        'mmlu', 'bbh', 'agieval'
+    ]

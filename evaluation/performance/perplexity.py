@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from typing import List, Optional
 import logging
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class PerplexityEvaluator:
     Evaluate language model perplexity.
     
     Supports custom text samples or standard datasets.
+    Uses proper loss calculation with padding mask.
     """
     
     def __init__(self, model_interface):
@@ -31,7 +33,13 @@ class PerplexityEvaluator:
             model_interface: ModelInterface instance
         """
         self.model_interface = model_interface
+        self.model = model_interface.get_model()
+        self.tokenizer = model_interface.get_tokenizer()
         self.device = model_interface.get_device()
+        
+        # Set model to eval mode
+        if hasattr(self.model, 'eval'):
+            self.model.eval()
     
     def calculate(
         self,
@@ -41,7 +49,8 @@ class PerplexityEvaluator:
         split: str = "test",
         num_samples: Optional[int] = 100,
         max_length: int = 512,
-        stride: Optional[int] = None
+        stride: Optional[int] = None,
+        batch_size: int = 1
     ) -> float:
         """
         Calculate perplexity on text samples or dataset.
@@ -51,14 +60,17 @@ class PerplexityEvaluator:
             dataset_name: HuggingFace dataset name
             dataset_config: Dataset configuration
             split: Dataset split
-            num_samples: Number of samples to use
+            num_samples: Number of samples to use (None = all)
             max_length: Maximum sequence length
-            stride: Stride for sliding window (None = no sliding)
+            stride: Stride for sliding window (None = no sliding, use simple batching)
+            batch_size: Batch size for processing
             
         Returns:
             Perplexity value
         """
         logger.info("Calculating perplexity...")
+        logger.info(f"  Dataset: {dataset_name}/{dataset_config}")
+        logger.info(f"  Max length: {max_length}, Stride: {stride}")
         
         texts = self._get_text_samples(
             text_samples, dataset_name, dataset_config, split, num_samples
@@ -68,12 +80,14 @@ class PerplexityEvaluator:
             logger.warning("No valid text samples available")
             return float('inf')
         
-        if stride is not None:
+        logger.info(f"Processing {len(texts)} text samples...")
+        
+        if stride is not None and stride > 0:
             perplexity = self._calculate_with_stride(texts, max_length, stride)
         else:
-            perplexity = self._calculate_simple(texts, max_length)
+            perplexity = self._calculate_simple(texts, max_length, batch_size)
         
-        logger.info(f"Perplexity: {perplexity:.2f}")
+        logger.info(f"Perplexity: {perplexity:.4f}")
         return perplexity
     
     def _get_text_samples(
@@ -94,72 +108,134 @@ class PerplexityEvaluator:
             return []
         
         try:
-            logger.info(f"Loading {dataset_name}/{dataset_config}...")
+            logger.info(f"Loading {dataset_name}/{dataset_config} (split: {split})...")
             dataset = load_dataset(
-                dataset_name, dataset_config, split=split, trust_remote_code=True
+                dataset_name, 
+                dataset_config if dataset_config else None,
+                split=split, 
+                trust_remote_code=True
             )
             
             if num_samples and len(dataset) > num_samples:
-                dataset = dataset.select(range(num_samples))
+                # Sample evenly across the dataset
+                indices = np.linspace(0, len(dataset) - 1, num_samples, dtype=int)
+                dataset = dataset.select(indices)
             
             # Try different common field names
             texts = []
-            for item in dataset:
-                text = item.get('text') or item.get('sentence') or item.get('content') or ''
-                if text and len(text.strip()) > 0:
-                    texts.append(text)
+            text_field = None
             
-            if not texts:
-                logger.warning(f"No valid text found in dataset. Available fields: {list(dataset[0].keys())}")
+            # Detect text field
+            sample = dataset[0]
+            for field in ['text', 'sentence', 'content', 'document', 'article']:
+                if field in sample:
+                    text_field = field
+                    break
+            
+            if not text_field:
+                logger.error(f"No text field found. Available fields: {list(sample.keys())}")
                 return []
             
-            logger.info(f"Loaded {len(texts)} text samples")
+            logger.info(f"Using text field: '{text_field}'")
+            
+            for item in dataset:
+                text = item.get(text_field, '')
+                # Filter out empty or very short texts
+                if text and len(text.strip()) > 10:
+                    texts.append(text.strip())
+            
+            if not texts:
+                logger.warning(f"No valid text found in dataset")
+                return []
+            
+            logger.info(f"Loaded {len(texts)} valid text samples")
             return texts
             
         except Exception as e:
-            logger.error(f"Failed to load dataset: {e}")
+            logger.error(f"Failed to load dataset: {e}", exc_info=True)
             return []
     
-    def _calculate_simple(self, texts: List[str], max_length: int) -> float:
-        """Calculate perplexity without sliding window."""
-        total_loss = 0.0
-        total_tokens = 0
-        tokenizer = self.model_interface.get_tokenizer()
+    def _calculate_simple(
+        self, 
+        texts: List[str], 
+        max_length: int,
+        batch_size: int = 1
+    ) -> float:
+        """
+        Calculate perplexity without sliding window.
         
-        with torch.no_grad():
-            for text in texts:
+        This is faster but may be less accurate for very long texts.
+        """
+        total_nll = 0.0  # negative log-likelihood
+        total_tokens = 0
+        num_processed = 0
+        
+        # Use tqdm for progress if available
+        try:
+            from tqdm import tqdm
+            texts_iter = tqdm(texts, desc="Computing perplexity")
+        except ImportError:
+            texts_iter = texts
+        
+        with torch.inference_mode():
+            for text in texts_iter:
                 if not text or len(text.strip()) == 0:
                     continue
                 
                 try:
-                    inputs = tokenizer(
+                    # Tokenize
+                    encodings = self.tokenizer(
                         text,
                         return_tensors="pt",
                         truncation=True,
-                        max_length=max_length
+                        max_length=max_length,
+                        add_special_tokens=True
                     )
                     
-                    if inputs["input_ids"].size(1) < 2:
+                    input_ids = encodings["input_ids"].to(self.device)
+                    
+                    # Skip if too short
+                    if input_ids.size(1) < 2:
                         continue
                     
-                    inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                    # Get logits from model
+                    outputs = self.model(input_ids, labels=input_ids)
                     
-                    logits = self.model_interface.forward(inputs["input_ids"])
+                    # Use model's loss if available (handles everything correctly)
+                    if hasattr(outputs, 'loss') and outputs.loss is not None:
+                        nll = outputs.loss.item() * (input_ids.size(1) - 1)
+                        num_tokens = input_ids.size(1) - 1
+                    else:
+                        # Manual calculation
+                        logits = outputs.logits if hasattr(outputs, 'logits') else outputs
+                        
+                        # Shift for next-token prediction
+                        shift_logits = logits[:, :-1, :].contiguous()
+                        shift_labels = input_ids[:, 1:].contiguous()
+                        
+                        # Calculate cross-entropy loss
+                        loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+                        losses = loss_fct(
+                            shift_logits.view(-1, shift_logits.size(-1)),
+                            shift_labels.view(-1)
+                        )
+                        
+                        # Sum the losses
+                        nll = losses.sum().item()
+                        num_tokens = shift_labels.numel()
                     
-                    # Shift for next-token prediction
-                    shift_logits = logits[..., :-1, :].contiguous()
-                    shift_labels = inputs["input_ids"][..., 1:].contiguous()
+                    total_nll += nll
+                    total_tokens += num_tokens
+                    num_processed += 1
                     
-                    # Calculate cross entropy loss
-                    loss_fct = torch.nn.CrossEntropyLoss(reduction='sum')
-                    loss = loss_fct(
-                        shift_logits.view(-1, shift_logits.size(-1)),
-                        shift_labels.view(-1)
-                    )
-                    
-                    total_loss += loss.item()
-                    total_tokens += shift_labels.numel()
-                    
+                except RuntimeError as e:
+                    if "out of memory" in str(e).lower():
+                        logger.warning(f"OOM on sample, skipping...")
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    else:
+                        logger.debug(f"Skipping sample due to error: {e}")
+                    continue
                 except Exception as e:
                     logger.debug(f"Skipping sample due to error: {e}")
                     continue
@@ -168,67 +244,141 @@ class PerplexityEvaluator:
             logger.warning("No tokens processed successfully")
             return float('inf')
         
-        avg_loss = total_loss / total_tokens
-        perplexity = np.exp(avg_loss)
+        # Calculate perplexity
+        avg_nll = total_nll / total_tokens
+        perplexity = np.exp(avg_nll)
+        
+        logger.info(f"Processed {num_processed}/{len(texts)} samples successfully")
+        logger.info(f"Total tokens: {total_tokens:,}")
+        logger.info(f"Average NLL: {avg_nll:.4f}")
         
         return perplexity
     
     def _calculate_with_stride(
-        self, texts: List[str], max_length: int, stride: int
+        self, 
+        texts: List[str], 
+        max_length: int, 
+        stride: int
     ) -> float:
-        """Calculate perplexity with sliding window (more accurate for long texts)."""
-        total_loss = 0.0
-        total_tokens = 0
-        tokenizer = self.model_interface.get_tokenizer()
+        """
+        Calculate perplexity with sliding window.
         
-        with torch.no_grad():
-            for text in texts:
+        This is more accurate for long texts but slower.
+        Uses stride to create overlapping windows.
+        """
+        total_nll = 0.0
+        total_tokens = 0
+        num_processed = 0
+        
+        logger.info(f"Using sliding window with stride {stride}")
+        
+        # Use tqdm for progress if available
+        try:
+            from tqdm import tqdm
+            texts_iter = tqdm(texts, desc="Computing perplexity (stride)")
+        except ImportError:
+            texts_iter = texts
+        
+        with torch.inference_mode():
+            for text in texts_iter:
                 if not text or len(text.strip()) == 0:
                     continue
                 
                 try:
-                    encodings = tokenizer(text, return_tensors="pt")
+                    # Tokenize full text
+                    encodings = self.tokenizer(
+                        text, 
+                        return_tensors="pt",
+                        add_special_tokens=True
+                    )
                     input_ids = encodings["input_ids"].to(self.device)
                     
                     seq_len = input_ids.size(1)
                     
-                    # Sliding window
+                    if seq_len < 2:
+                        continue
+                    
+                    # Process with sliding window
+                    prev_end_loc = 0
                     for begin_loc in range(0, seq_len, stride):
                         end_loc = min(begin_loc + max_length, seq_len)
                         
+                        # Extract chunk
                         input_chunk = input_ids[:, begin_loc:end_loc]
                         
                         if input_chunk.size(1) < 2:
                             continue
                         
-                        logits = self.model_interface.forward(input_chunk)
+                        # Get model outputs
+                        outputs = self.model(input_chunk, labels=input_chunk)
                         
-                        # Shift for next-token prediction
-                        shift_logits = logits[..., :-1, :].contiguous()
-                        shift_labels = input_chunk[..., 1:].contiguous()
+                        # Calculate loss for this chunk
+                        if hasattr(outputs, 'loss') and outputs.loss is not None:
+                            # Only count the non-overlapping part
+                            target_len = end_loc - begin_loc - (begin_loc - prev_end_loc) if begin_loc > 0 else end_loc - begin_loc - 1
+                            nll = outputs.loss.item() * target_len
+                            num_tokens = target_len
+                        else:
+                            # Manual calculation
+                            logits = outputs.logits if hasattr(outputs, 'logits') else outputs
+                            
+                            # Shift for next-token prediction
+                            shift_logits = logits[:, :-1, :].contiguous()
+                            shift_labels = input_chunk[:, 1:].contiguous()
+                            
+                            # For overlapping regions, only count new tokens
+                            if begin_loc > 0:
+                                # Skip overlapping part
+                                overlap = begin_loc - prev_end_loc
+                                if overlap < shift_labels.size(1):
+                                    shift_logits = shift_logits[:, overlap:, :]
+                                    shift_labels = shift_labels[:, overlap:]
+                            
+                            if shift_labels.numel() == 0:
+                                prev_end_loc = end_loc
+                                continue
+                            
+                            # Calculate loss
+                            loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+                            losses = loss_fct(
+                                shift_logits.reshape(-1, shift_logits.size(-1)),
+                                shift_labels.reshape(-1)
+                            )
+                            
+                            nll = losses.sum().item()
+                            num_tokens = shift_labels.numel()
                         
-                        # Calculate cross entropy loss
-                        loss_fct = torch.nn.CrossEntropyLoss(reduction='sum')
-                        loss = loss_fct(
-                            shift_logits.view(-1, shift_logits.size(-1)),
-                            shift_labels.view(-1)
-                        )
-                        
-                        total_loss += loss.item()
-                        total_tokens += shift_labels.numel()
+                        total_nll += nll
+                        total_tokens += num_tokens
+                        prev_end_loc = end_loc
                         
                         if end_loc == seq_len:
                             break
-                            
+                    
+                    num_processed += 1
+                    
+                except RuntimeError as e:
+                    if "out of memory" in str(e).lower():
+                        logger.warning(f"OOM on sample, skipping...")
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    else:
+                        logger.debug(f"Skipping sample due to error: {e}")
+                    continue
                 except Exception as e:
-                    logger.debug(f"Skipping chunk due to error: {e}")
+                    logger.debug(f"Skipping sample due to error: {e}")
                     continue
         
         if total_tokens == 0:
             logger.warning("No tokens processed successfully")
             return float('inf')
         
-        avg_loss = total_loss / total_tokens
-        perplexity = np.exp(avg_loss)
+        # Calculate perplexity
+        avg_nll = total_nll / total_tokens
+        perplexity = np.exp(avg_nll)
+        
+        logger.info(f"Processed {num_processed}/{len(texts)} samples successfully")
+        logger.info(f"Total tokens: {total_tokens:,}")
+        logger.info(f"Average NLL: {avg_nll:.4f}")
         
         return perplexity

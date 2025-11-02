@@ -1,4 +1,4 @@
-"""Performance benchmark orchestrator."""
+"""Performance benchmark orchestrator - fixed and enhanced."""
 
 import logging
 from typing import List, Optional, Dict, Any, Union
@@ -15,8 +15,10 @@ logger = logging.getLogger(__name__)
 class PerformanceResults(BenchmarkResult):
     """Results from performance benchmarks."""
     perplexity: Optional[float] = None
+    perplexity_dataset: Optional[str] = None
     lm_eval_scores: Dict[str, float] = field(default_factory=dict)
     average_accuracy: Optional[float] = None
+    num_tasks_evaluated: int = 0
     
     def __str__(self) -> str:
         """Pretty print results with task grouping."""
@@ -24,23 +26,41 @@ class PerformanceResults(BenchmarkResult):
         
         # Perplexity
         if self.perplexity is not None:
-            lines.append(f"{'Perplexity':.<40} {self.perplexity:.2f}")
+            dataset_info = f" ({self.perplexity_dataset})" if self.perplexity_dataset else ""
+            lines.append(f"{'Perplexity' + dataset_info:.<40} {self.perplexity:.4f}")
         
         # LM Eval scores
         if self.lm_eval_scores:
-            lines.append(f"\n{'LM-Eval Tasks':.<40}")
+            lines.append(f"\n{'LM-Eval Tasks'} ({self.num_tasks_evaluated} tasks)")
             lines.append('-'*60)
             
             # Group tasks by category
             categories = {
-                'Reasoning & Common Sense': ['arc_easy', 'arc_challenge', 'hellaswag', 'piqa', 
-                                             'siqa', 'winogrande', 'commonsense_qa', 'openbookqa'],
-                'Language Understanding': ['lambada', 'storycloze'],
-                'Knowledge & QA': ['nq_open', 'triviaqa'],
-                'Comprehensive': ['mmlu', 'bbh', 'agieval'],
-                'GLUE/SuperGLUE': ['glue', 'super_glue', 'boolq'],
-                'Math': ['gsm8k', 'hendrycks_math', 'math_algebra'],
-                'Code': ['humaneval', 'mbpp']
+                'Commonsense Reasoning (0-shot)': [
+                    'hellaswag', 'winogrande', 'piqa', 'siqa', 
+                    'openbookqa', 'arc_easy', 'arc_challenge', 'commonsense_qa'
+                ],
+                'World Knowledge (5-shot)': [
+                    'nq_open', 'triviaqa'
+                ],
+                'Reading Comprehension (0-shot)': [
+                    'boolq', 'quac'
+                ],
+                'Math': [
+                    'gsm8k', 'hendrycks_math', 'math_algebra'
+                ],
+                'Code': [
+                    'humaneval', 'mbpp'
+                ],
+                'Aggregate Benchmarks': [
+                    'mmlu', 'bbh', 'agieval'
+                ],
+                'Language Understanding': [
+                    'lambada', 'storycloze'
+                ],
+                'NLP Benchmarks': [
+                    'glue', 'super_glue'
+                ]
             }
             
             for category, task_list in categories.items():
@@ -48,7 +68,9 @@ class PerformanceResults(BenchmarkResult):
                 if category_tasks:
                     lines.append(f"\n  {category}:")
                     for task, score in sorted(category_tasks.items()):
-                        lines.append(f"    {task:.<36} {score:.4f}")
+                        # Convert to percentage for readability
+                        score_pct = score * 100
+                        lines.append(f"    {task:.<36} {score_pct:>5.2f}%")
             
             # Uncategorized tasks
             categorized = set(task for tasks in categories.values() for task in tasks)
@@ -56,11 +78,13 @@ class PerformanceResults(BenchmarkResult):
             if other_tasks:
                 lines.append(f"\n  Other Tasks:")
                 for task, score in sorted(other_tasks.items()):
-                    lines.append(f"    {task:.<36} {score:.4f}")
+                    score_pct = score * 100
+                    lines.append(f"    {task:.<36} {score_pct:>5.2f}%")
             
             # Average
             if self.average_accuracy is not None:
-                lines.append(f"\n{'Average Accuracy':.<40} {self.average_accuracy:.4f}")
+                avg_pct = self.average_accuracy * 100
+                lines.append(f"\n{'Average Accuracy':.<40} {avg_pct:>5.2f}%")
         
         lines.append('='*60)
         return '\n'.join(lines)
@@ -71,8 +95,10 @@ class PerformanceBenchmark(ModelBenchmark[PerformanceResults]):
     Benchmark suite for measuring model performance/accuracy.
     
     Measures:
-        - Perplexity on text datasets
+        - Perplexity on text datasets (WikiText, etc.)
         - Accuracy on standard benchmarks via lm-eval-harness
+    
+    Supports the full suite of tasks from the Mistral paper and beyond.
     """
     
     def __init__(
@@ -110,12 +136,15 @@ class PerformanceBenchmark(ModelBenchmark[PerformanceResults]):
             return False
         
         # Check if at least one evaluation is enabled
-        has_perplexity = self.config.get('measure_perplexity', False)
-        has_lm_eval = self.config.get('run_lm_eval', False)
+        perplexity_config = self.config.get('perplexity', {})
+        lm_eval_config = self.config.get('lm_eval', {})
+        
+        has_perplexity = perplexity_config.get('enabled', False)
+        has_lm_eval = lm_eval_config.get('enabled', False)
         
         if not has_perplexity and not has_lm_eval:
             logger.warning("No performance metrics enabled in config")
-            return False
+            # Don't fail validation, just warn
         
         return True
     
@@ -123,8 +152,8 @@ class PerformanceBenchmark(ModelBenchmark[PerformanceResults]):
         self,
         measure_perplexity: Optional[bool] = None,
         run_lm_eval: Optional[bool] = None,
-        perplexity_config: Optional[Dict[str, Any]] = None,
-        lm_eval_tasks: Optional[Union[List[str], Dict[str, Any]]] = None
+        perplexity_kwargs: Optional[Dict[str, Any]] = None,
+        lm_eval_kwargs: Optional[Dict[str, Any]] = None
     ) -> PerformanceResults:
         """
         Run all performance benchmarks.
@@ -132,33 +161,63 @@ class PerformanceBenchmark(ModelBenchmark[PerformanceResults]):
         Args:
             measure_perplexity: Whether to measure perplexity (uses config if None)
             run_lm_eval: Whether to run lm-eval (uses config if None)
-            perplexity_config: Config for perplexity calculation
-            lm_eval_tasks: Tasks for lm-eval (uses config if None)
+            perplexity_kwargs: Additional kwargs for perplexity calculation
+            lm_eval_kwargs: Additional kwargs for lm-eval
             
         Returns:
             PerformanceResults object with all metrics
         """
-        # Use config values if not provided
-        measure_perplexity = measure_perplexity if measure_perplexity is not None else self.config.get('measure_perplexity', True)
-        run_lm_eval = run_lm_eval if run_lm_eval is not None else self.config.get('run_lm_eval', False)
+        # Validate config
+        self.validate_config()
         
-        logger.info("Starting performance benchmarks...")
+        # Determine what to run
+        perplexity_config = self.config.get('perplexity', {})
+        lm_eval_config = self.config.get('lm_eval', {})
+        
+        measure_perplexity = (
+            measure_perplexity if measure_perplexity is not None 
+            else perplexity_config.get('enabled', True)
+        )
+        run_lm_eval = (
+            run_lm_eval if run_lm_eval is not None 
+            else lm_eval_config.get('enabled', False)
+        )
+        
+        logger.info("="*60)
+        logger.info("Starting performance benchmarks")
+        logger.info("="*60)
         
         results = PerformanceResults()
         
         # Measure perplexity
         if measure_perplexity:
-            results.perplexity = self._measure_perplexity(perplexity_config)
+            logger.info("\n--- Perplexity Evaluation ---")
+            perplexity_result = self._measure_perplexity(
+                perplexity_config, 
+                perplexity_kwargs
+            )
+            if perplexity_result:
+                results.perplexity = perplexity_result['perplexity']
+                results.perplexity_dataset = perplexity_result.get('dataset')
         
         # Run lm-eval-harness
         if run_lm_eval:
-            results.lm_eval_scores = self._run_lm_eval(lm_eval_tasks)
+            logger.info("\n--- LM-Eval-Harness ---")
+            lm_eval_scores = self._run_lm_eval(
+                lm_eval_config,
+                lm_eval_kwargs
+            )
+            results.lm_eval_scores = lm_eval_scores
+            results.num_tasks_evaluated = len(lm_eval_scores)
             
             # Calculate average accuracy
-            if results.lm_eval_scores:
-                results.average_accuracy = sum(results.lm_eval_scores.values()) / len(results.lm_eval_scores)
+            if lm_eval_scores:
+                results.average_accuracy = sum(lm_eval_scores.values()) / len(lm_eval_scores)
         
+        logger.info("\n" + "="*60)
         logger.info("Performance benchmarks complete!")
+        logger.info("="*60)
+        
         if self.verbose:
             print(results)
         
@@ -166,30 +225,39 @@ class PerformanceBenchmark(ModelBenchmark[PerformanceResults]):
     
     def _measure_perplexity(
         self,
-        perplexity_config: Optional[Dict[str, Any]] = None
-    ) -> Optional[float]:
+        config: Dict[str, Any],
+        additional_kwargs: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Measure perplexity on dataset.
         
         Args:
-            perplexity_config: Configuration for perplexity measurement
+            config: Perplexity configuration from config.json
+            additional_kwargs: Additional keyword arguments
             
         Returns:
-            Perplexity value
+            Dictionary with perplexity and metadata
         """
         try:
-            logger.info("Measuring perplexity...")
+            # Merge configs
+            kwargs = dict(config)
+            if additional_kwargs:
+                kwargs.update(additional_kwargs)
             
-            # Get config from parameter or self.config
-            config = perplexity_config or {}
+            # Remove 'enabled' flag
+            kwargs.pop('enabled', None)
             
-            # Extract perplexity parameters
-            dataset_name = config.get('dataset', self.config.get('perplexity_dataset', 'wikitext'))
-            dataset_config = config.get('dataset_config', 'wikitext-2-raw-v1')
-            split = config.get('split', 'test')
-            num_samples = config.get('num_samples', self.config.get('perplexity_num_samples', 100))
-            max_length = config.get('max_length', 512)
-            stride = config.get('stride', None)
+            # Extract parameters
+            dataset_name = kwargs.pop('dataset', 'wikitext')
+            dataset_config = kwargs.pop('dataset_config', 'wikitext-2-raw-v1')
+            split = kwargs.pop('split', 'test')
+            num_samples = kwargs.pop('num_samples', 100)
+            max_length = kwargs.pop('max_length', 512)
+            stride = kwargs.pop('stride', None)
+            batch_size = kwargs.pop('batch_size', 1)
+            
+            logger.info(f"Dataset: {dataset_name}/{dataset_config}")
+            logger.info(f"Samples: {num_samples}, Max length: {max_length}")
             
             perplexity = self.perplexity_evaluator.calculate(
                 dataset_name=dataset_name,
@@ -197,25 +265,32 @@ class PerformanceBenchmark(ModelBenchmark[PerformanceResults]):
                 split=split,
                 num_samples=num_samples,
                 max_length=max_length,
-                stride=stride
+                stride=stride,
+                batch_size=batch_size
             )
             
-            self._log_metric("Perplexity", f"{perplexity:.2f}")
-            return perplexity
+            self._log_metric("Perplexity", f"{perplexity:.4f}")
+            
+            return {
+                'perplexity': perplexity,
+                'dataset': f"{dataset_name}/{dataset_config}"
+            }
             
         except Exception as e:
-            logger.error(f"Error measuring perplexity: {e}")
+            logger.error(f"Error measuring perplexity: {e}", exc_info=self.verbose)
             return None
     
     def _run_lm_eval(
         self,
-        lm_eval_tasks: Optional[Union[List[str], Dict[str, Any]]] = None
+        config: Dict[str, Any],
+        additional_kwargs: Optional[Dict[str, Any]] = None
     ) -> Dict[str, float]:
         """
         Run lm-evaluation-harness benchmarks.
         
         Args:
-            lm_eval_tasks: Either list of task names or dict with task configs
+            config: LM-Eval configuration from config.json
+            additional_kwargs: Additional keyword arguments
             
         Returns:
             Dictionary of task scores
@@ -224,33 +299,49 @@ class PerformanceBenchmark(ModelBenchmark[PerformanceResults]):
             # Check if model supports lm-eval
             if not self.model_interface.supports_lm_eval():
                 logger.warning("Model interface does not support lm-eval")
+                logger.warning("Implement get_lm_eval_model() in your ModelInterface")
                 return {}
             
-            logger.info("Running lm-eval-harness...")
+            # Get tasks configuration
+            tasks_config = config.get('tasks', {})
             
-            # Get tasks from parameter or config
-            if lm_eval_tasks is None:
-                lm_eval_tasks = self.config.get('lm_eval_tasks', ['hellaswag'])
+            # Filter enabled tasks
+            enabled_tasks = {}
+            for task_name, task_cfg in tasks_config.items():
+                if isinstance(task_cfg, dict) and task_cfg.get('enabled', False):
+                    enabled_tasks[task_name] = task_cfg
             
-            # Get default parameters (used if not specified per-task)
-            default_num_fewshot = self.config.get('lm_eval_num_fewshot', 0)
-            default_limit = self.config.get('lm_eval_limit', None)
-            default_batch_size = self.config.get('lm_eval_batch_size', 1)
+            if not enabled_tasks:
+                logger.info("No LM-Eval tasks enabled")
+                return {}
             
+            logger.info(f"Running {len(enabled_tasks)} LM-Eval tasks:")
+            for task_name in enabled_tasks.keys():
+                logger.info(f"  • {task_name}")
+            
+            # Get global settings
+            global_batch_size = config.get('batch_size', 1)
+            
+            # Run evaluation
             scores = run_lm_eval_harness(
                 model_interface=self.model_interface,
-                tasks=lm_eval_tasks,
-                num_fewshot=default_num_fewshot,
-                limit=default_limit,
-                batch_size=default_batch_size
+                tasks=enabled_tasks,
+                num_fewshot=None,  # Use per-task settings
+                limit=None,  # Use per-task settings
+                batch_size=global_batch_size
             )
             
             # Log individual scores
-            for task, score in scores.items():
-                self._log_metric(f"lm-eval/{task}", f"{score:.4f}")
+            if scores:
+                logger.info("\nResults:")
+                for task, score in sorted(scores.items()):
+                    self._log_metric(f"  {task}", f"{score*100:.2f}%")
+                
+                avg_score = sum(scores.values()) / len(scores)
+                logger.info(f"\nAverage: {avg_score*100:.2f}%")
             
             return scores
             
         except Exception as e:
-            logger.error(f"Error running lm-eval: {e}")
+            logger.error(f"Error running lm-eval: {e}", exc_info=self.verbose)
             return {}
