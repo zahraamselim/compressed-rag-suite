@@ -58,11 +58,12 @@ class RAGGenerator:
             prompt = self._format_base_prompt(query, context)
         
         # Use model interface for generation
+        # Override temperature for RAG to reduce hallucination
         answer = self.model_interface.generate(
             prompt=prompt,
             max_new_tokens=self.max_new_tokens,
-            temperature=self.temperature,
-            do_sample=self.do_sample,
+            temperature=0.1,  # Very low for factual extraction
+            do_sample=False,  # Greedy decoding for consistency
             top_p=self.top_p,
             repetition_penalty=self.repetition_penalty
         )
@@ -174,24 +175,26 @@ class RAGGenerator:
         return answers
     
     def _format_instruct_prompt(self, query: str, context: str) -> str:
-        """Format prompt for instruct models."""
+        """Format prompt for instruct models with strict constraints."""
         tokenizer = self.model_interface.get_tokenizer()
         
         if self.use_chat_template and hasattr(tokenizer, 'apply_chat_template'):
             messages = [{
                 "role": "user",
-                "content": f"""Answer the question using ONLY the provided context.
+                "content": f"""You are a precise information extraction assistant. Answer the question using ONLY information from the provided context. Do not add any information that is not explicitly stated in the context.
 
 Context:
 {context}
 
 Question: {query}
 
-Instructions:
-- Answer in 1-3 sentences
-- Use only information from the context
-- If the answer is not in the context, say "Not mentioned in the provided context"
-- Be specific and concise
+CRITICAL INSTRUCTIONS:
+- Extract the answer directly from the context above
+- Use 1-3 complete sentences maximum
+- Do NOT invent, infer, or add any information not in the context
+- If the exact answer is not in the context, respond ONLY with: "The information is not provided in the given context."
+- Quote or closely paraphrase the relevant text
+- Be factual and concise
 
 Answer:"""
             }]
@@ -205,23 +208,30 @@ Answer:"""
             except Exception as e:
                 logger.warning(f"Chat template failed: {e}, using fallback format")
         
-        # Fallback format
-        return f"""Answer the question using the context below.
+        # Fallback format with strict constraints
+        return f"""You must answer using ONLY the information provided in the context below. Do not add any external knowledge.
 
 Context:
 {context}
 
 Question: {query}
 
+Instructions:
+- Answer in 1-3 sentences
+- Use ONLY information from the context
+- If not in context, say: "The information is not provided in the given context."
+
 Answer:"""
     
     def _format_base_prompt(self, query: str, context: str) -> str:
         """Format prompt for base models."""
-        return f"""Context: {context}
+        return f"""Use the context below to answer the question. Only use information from the context.
+
+Context: {context}
 
 Question: {query}
 
-Answer:"""
+Answer based only on the context above:"""
     
     def _format_instruct_prompt_no_rag(self, query: str) -> str:
         """Format prompt without context for instruct models."""
@@ -247,19 +257,19 @@ Answer:"""
         """Format prompt without context for base models."""
         return f"Question: {query}\n\nAnswer:"
     
-    def _clean_answer(self, answer: str, max_sentences: int = 5) -> str:
+    def _clean_answer(self, answer: str, max_sentences: int = 3) -> str:
         """
         Clean and normalize generated answer.
         
         Args:
             answer: Raw generated text
-            max_sentences: Maximum sentences to keep
+            max_sentences: Maximum sentences to keep (reduced to 3)
             
         Returns:
             Cleaned answer
         """
         if not answer or answer.lower() in ['', 'none', 'n/a']:
-            return "Not mentioned in the provided context"
+            return "The information is not provided in the given context."
         
         # Remove excessive whitespace
         answer = re.sub(r'\s+', ' ', answer).strip()
@@ -268,7 +278,7 @@ Answer:"""
         answer = re.sub(r'^(Answer:|A:)\s*', '', answer, flags=re.IGNORECASE)
         answer = answer.strip()
         
-        # Truncate to max sentences
+        # Truncate to max sentences (now 3 instead of 5)
         sentences = re.split(r'[.!?]+', answer)
         sentences = [s.strip() for s in sentences if s.strip()]
         
