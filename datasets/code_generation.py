@@ -6,9 +6,11 @@ Available datasets:
 2. MBPP - Mostly Basic Python Problems
 3. CodeAlpaca - Instruction-tuning for code
 4. CodeContests - Competitive programming
+
+Fixed: Import HuggingFace datasets library with alias to avoid circular import
 """
 
-from datasets import load_dataset
+from datasets import load_dataset as hf_load_dataset  # Fixed: use alias
 from typing import List, Tuple, Optional, Dict, Any
 import random
 import logging
@@ -37,7 +39,7 @@ class HumanEvalDataset(BaseDatasetLoader):
         logger.info("Loading HumanEval dataset...")
         
         try:
-            dataset = load_dataset("openai_humaneval")
+            dataset = hf_load_dataset("openai_humaneval")
             
             samples = []
             for item in dataset['test']:
@@ -134,7 +136,7 @@ class MBPPDataset(BaseDatasetLoader):
         logger.info("Loading MBPP dataset...")
         
         try:
-            dataset = load_dataset("mbpp")
+            dataset = hf_load_dataset("mbpp")
             
             train_samples = []
             for item in dataset['train']:
@@ -219,7 +221,7 @@ class CodeAlpacaDataset(BaseDatasetLoader):
         logger.info("Loading CodeAlpaca dataset...")
         
         try:
-            dataset = load_dataset("sahil2801/CodeAlpaca-20k")
+            dataset = hf_load_dataset("sahil2801/CodeAlpaca-20k")
             
             samples = []
             for item in dataset['train']:
@@ -282,7 +284,7 @@ class CodeContestsDataset(BaseDatasetLoader):
         logger.info(f"Loading CodeContests dataset (language: {self.language})...")
         
         try:
-            dataset = load_dataset("deepmind/code_contests")
+            dataset = hf_load_dataset("deepmind/code_contests")
             
             samples = []
             for split in ['train', 'valid', 'test']:
@@ -381,7 +383,7 @@ def load_code_dataset(
         >>> train, eval = dataset.load()
         >>> print(dataset.get_info())
     """
-    datasets = {
+    datasets_map = {
         'humaneval': HumanEvalDataset,
         'mbpp': MBPPDataset,
         'codealpaca': CodeAlpacaDataset,
@@ -389,8 +391,8 @@ def load_code_dataset(
     }
     
     dataset_name = dataset_name.lower()
-    if dataset_name not in datasets:
-        raise ValueError(f"Unknown dataset: {dataset_name}. Available: {list(datasets.keys())}")
+    if dataset_name not in datasets_map:
+        raise ValueError(f"Unknown dataset: {dataset_name}. Available: {list(datasets_map.keys())}")
     
-    dataset_class = datasets[dataset_name]
+    dataset_class = datasets_map[dataset_name]
     return dataset_class(config)
