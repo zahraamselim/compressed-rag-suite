@@ -1,4 +1,4 @@
-"""Retrieval benchmark orchestrator."""
+"""Retrieval benchmark orchestrator - FIXED VERSION."""
 
 import logging
 import numpy as np
@@ -45,6 +45,11 @@ class RetrievalResults(BenchmarkResult):
     bertscore_f1: Optional[float] = None
     avg_answer_length: Optional[float] = None
     
+    # NEW: Retrieval consistency metrics (don't need ground truth!)
+    avg_retrieval_score: Optional[float] = None  # Average similarity scores
+    retrieval_consistency: Optional[float] = None  # Score variance (lower = more consistent)
+    avg_chunks_retrieved: Optional[float] = None  # How many chunks returned
+    
     # Comparison metrics
     no_rag_f1: Optional[float] = None
     no_rag_exact_match: Optional[float] = None
@@ -55,13 +60,6 @@ class RetrievalResults(BenchmarkResult):
 class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
     """
     Benchmark suite for measuring RAG retrieval quality and end-to-end performance.
-    
-    Measures:
-        - Retrieval quality: Precision@K, Recall@K, F1@K, MRR, MAP
-        - Context relevance: How relevant retrieved contexts are to queries
-        - Answer quality: Exact Match, F1, ROUGE, BERTScore
-        - Faithfulness: How well answers stick to retrieved context
-        - Comparison with no-RAG baseline
     """
     
     def __init__(
@@ -71,15 +69,6 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         config: dict,
         verbose: bool = False
     ):
-        """
-        Initialize retrieval benchmark.
-        
-        Args:
-            model_interface: ModelInterface instance
-            rag_pipeline: RAGPipeline instance
-            config: Retrieval config from config.json
-            verbose: Enable verbose logging
-        """
         super().__init__(
             model_interface=model_interface,
             config=config,
@@ -97,7 +86,6 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         if not super().validate_config():
             return False
         
-        # Check if at least one evaluation is enabled
         has_retrieval_eval = self.config.get('measure_retrieval_quality', False)
         has_context_eval = self.config.get('measure_context_relevance', False)
         has_answer_eval = self.config.get('measure_answer_faithfulness', False)
@@ -120,24 +108,8 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         compare_no_rag: Optional[bool] = None,
         k_values: Optional[List[int]] = None
     ) -> RetrievalResults:
-        """
-        Run all retrieval benchmarks.
+        """Run all retrieval benchmarks."""
         
-        Args:
-            questions: List of questions to evaluate
-            ground_truth_answers: Ground truth answers (for answer quality metrics)
-            relevant_doc_ids: List of sets of relevant document IDs per question
-            documents: Documents to index (if not already indexed)
-            measure_retrieval_quality: Whether to measure retrieval metrics
-            measure_context_relevance: Whether to measure context relevance
-            measure_answer_faithfulness: Whether to measure answer faithfulness
-            compare_no_rag: Whether to compare with no-RAG baseline
-            k_values: K values for Precision@K, Recall@K, F1@K
-            
-        Returns:
-            RetrievalResults object with all metrics
-        """
-        # Validate inputs
         if not questions:
             raise ValueError("No questions provided for evaluation")
         
@@ -174,7 +146,6 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
             try:
                 contexts = self.rag_pipeline.retrieve(question)
                 retrieved_contexts.append(contexts)
-                # Extract chunk IDs if available
                 chunk_ids = [ctx.get('chunk_id', ctx.get('id', f'chunk_{i}')) 
                             for i, ctx in enumerate(contexts)]
                 retrieved_ids.append(chunk_ids)
@@ -183,9 +154,10 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                 retrieved_contexts.append([])
                 retrieved_ids.append([])
         
-        # Measure retrieval quality
+        # FIXED: Measure retrieval quality WITH ground truth
         if measure_retrieval_quality and relevant_doc_ids:
             try:
+                logger.info("Measuring retrieval quality with ground truth...")
                 retrieval_results = self._evaluate_retrieval_quality(
                     questions, retrieved_ids, relevant_doc_ids, k_values
                 )
@@ -193,6 +165,16 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                     setattr(results, key.replace('@', '_at_').replace('-', '_'), value)
             except Exception as e:
                 logger.error(f"Error evaluating retrieval quality: {e}")
+        
+        # NEW: Measure retrieval quality WITHOUT ground truth (always useful!)
+        if measure_retrieval_quality:
+            try:
+                logger.info("Measuring retrieval consistency metrics...")
+                consistency_metrics = self._evaluate_retrieval_consistency(retrieved_contexts)
+                for key, value in consistency_metrics.items():
+                    setattr(results, key, value)
+            except Exception as e:
+                logger.error(f"Error evaluating retrieval consistency: {e}")
         
         # Measure context relevance
         if measure_context_relevance:
@@ -217,7 +199,6 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         # Measure answer quality and faithfulness
         if ground_truth_answers:
             try:
-                # Concatenate retrieved contexts for faithfulness
                 full_contexts = [
                     ' '.join([ctx.get('text', ctx.get('content', '')) for ctx in ctxs])
                     for ctxs in retrieved_contexts
@@ -257,7 +238,7 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         relevant_doc_ids: List[Set[str]],
         k_values: List[int]
     ) -> Dict[str, float]:
-        """Evaluate retrieval quality using IR metrics."""
+        """Evaluate retrieval quality using IR metrics (needs ground truth)."""
         logger.info("Evaluating retrieval quality...")
         
         retrieval_results = self.retrieval_metrics.evaluate_retrieval(
@@ -267,7 +248,6 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
             k_values=k_values
         )
         
-        # Rename map to map_score to avoid conflict
         if 'map' in retrieval_results:
             retrieval_results['map_score'] = retrieval_results.pop('map')
         
@@ -275,6 +255,44 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
             self._log_metric(metric, f"{value:.4f}")
         
         return retrieval_results
+    
+    def _evaluate_retrieval_consistency(
+        self,
+        retrieved_contexts: List[List[Dict[str, Any]]]
+    ) -> Dict[str, float]:
+        """
+        NEW: Evaluate retrieval consistency WITHOUT needing ground truth.
+        
+        Measures:
+        - Average retrieval score (how confident is the system?)
+        - Score consistency (do scores vary wildly?)
+        - Average chunks retrieved (are we getting results?)
+        """
+        scores = []
+        chunk_counts = []
+        
+        for contexts in retrieved_contexts:
+            if contexts:
+                # Extract scores
+                context_scores = [ctx.get('score', 0.0) for ctx in contexts]
+                scores.extend(context_scores)
+                chunk_counts.append(len(contexts))
+            else:
+                chunk_counts.append(0)
+        
+        metrics = {}
+        
+        if scores:
+            metrics['avg_retrieval_score'] = float(np.mean(scores))
+            metrics['retrieval_consistency'] = float(np.std(scores))  # Lower = more consistent
+            self._log_metric("avg_retrieval_score", f"{metrics['avg_retrieval_score']:.4f}")
+            self._log_metric("retrieval_consistency", f"{metrics['retrieval_consistency']:.4f}")
+        
+        if chunk_counts:
+            metrics['avg_chunks_retrieved'] = float(np.mean(chunk_counts))
+            self._log_metric("avg_chunks_retrieved", f"{metrics['avg_chunks_retrieved']:.2f}")
+        
+        return metrics
     
     def _evaluate_context_relevance(
         self,
@@ -290,7 +308,6 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                 relevance_scores.append(0.0)
                 continue
             
-            # Concatenate all retrieved context texts
             full_context = ' '.join([
                 ctx.get('text', ctx.get('content', ''))
                 for ctx in contexts
@@ -314,7 +331,6 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         
         for question in questions:
             try:
-                # Generate answer without retrieval
                 answer = self.rag_pipeline.generate_answer(question, contexts=[])
                 answers.append(answer)
             except Exception as e:
@@ -328,24 +344,7 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         dataset_path: str,
         **kwargs
     ) -> RetrievalResults:
-        """
-        Run evaluation from a dataset file.
-        
-        Expected JSON format:
-        {
-            "questions": [...],
-            "ground_truth_answers": [...],
-            "relevant_doc_ids": [[...], ...],  # Optional
-            "documents": [...]  # Optional, if not already indexed
-        }
-        
-        Args:
-            dataset_path: Path to dataset JSON file
-            **kwargs: Additional arguments to pass to run_all()
-            
-        Returns:
-            RetrievalResults object
-        """
+        """Run evaluation from a dataset file."""
         logger.info(f"Loading dataset from {dataset_path}")
         
         try:
@@ -361,16 +360,14 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
             logger.error(f"Error loading dataset: {e}")
             raise
         
-        # Extract data with validation
         questions = dataset.get('questions', [])
         if not questions:
-            raise ValueError("Dataset must contain 'questions' field with at least one question")
+            raise ValueError("Dataset must contain 'questions' field")
         
         ground_truth_answers = dataset.get('ground_truth_answers', None)
         relevant_doc_ids = dataset.get('relevant_doc_ids', None)
         documents = dataset.get('documents', None)
         
-        # Convert relevant_doc_ids to sets if provided
         if relevant_doc_ids:
             try:
                 relevant_doc_ids = [set(ids) if isinstance(ids, list) else ids 
