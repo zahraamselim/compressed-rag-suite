@@ -9,6 +9,14 @@ Available datasets:
 
 from pathlib import Path
 import json
+from typing import List, Tuple, Optional, Dict, Any
+import random
+import logging
+from datasets import load_dataset as hf_load_dataset
+
+from finetuning.base import BaseDatasetLoader, DatasetSample, DatasetInfo
+
+logger = logging.getLogger(__name__)
 
 
 class MedQADataset(BaseDatasetLoader):
@@ -25,7 +33,7 @@ class MedQADataset(BaseDatasetLoader):
         
         try:
             # MedQA US (English)
-            dataset = load_dataset("bigbio/med_qa", "med_qa_en_bigbio_qa")
+            dataset = hf_load_dataset("bigbio/med_qa", "med_qa_en_bigbio_qa")
             
             train_samples = []
             for item in dataset['train']:
@@ -105,7 +113,7 @@ class LegalBenchDataset(BaseDatasetLoader):
         logger.info(f"Loading LegalBench task: {self.task_name}...")
         
         try:
-            dataset = load_dataset("nguha/legalbench", self.task_name)
+            dataset = hf_load_dataset("nguha/legalbench", self.task_name)
             
             samples = []
             for item in dataset['test']:

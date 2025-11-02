@@ -9,6 +9,9 @@ Planned datasets:
 Implementation needed.
 """
 
+from finetuning.base import BaseDatasetLoader
+
+
 class CNNDailyMailDataset(BaseDatasetLoader):
     """TODO: Implement CNN/DailyMail dataset loader."""
     def load(self):

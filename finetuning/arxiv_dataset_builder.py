@@ -10,8 +10,12 @@ Usage:
 
 import PyPDF2
 import re
-from typing import List, Dict
-import openai  # Optional: for automatic QA generation
+import json
+import logging
+from typing import List, Dict, Optional
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class ArXivDatasetBuilder:

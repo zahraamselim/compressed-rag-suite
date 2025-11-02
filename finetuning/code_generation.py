@@ -15,7 +15,7 @@ from typing import List, Tuple, Optional, Dict, Any
 import random
 import logging
 
-from datasets.base import BaseDatasetLoader, DatasetSample, DatasetInfo
+from finetuning.base import BaseDatasetLoader, DatasetSample, DatasetInfo
 
 logger = logging.getLogger(__name__)
 

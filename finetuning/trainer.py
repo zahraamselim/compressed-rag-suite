@@ -1,5 +1,5 @@
 """
-Finetuning module for quantized models.
+Training module for quantized models.
 
 Supports:
 - LoRA/QLoRA finetuning for quantized models

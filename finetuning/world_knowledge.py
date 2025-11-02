@@ -9,6 +9,9 @@ Planned datasets:
 Implementation needed.
 """
 
+from finetuning.base import BaseDatasetLoader
+
+
 class MMLUDataset(BaseDatasetLoader):
     """TODO: Implement MMLU dataset loader."""
     def load(self):

@@ -9,6 +9,9 @@ Planned datasets:
 Implementation needed.
 """
 
+from finetuning.base import BaseDatasetLoader
+
+
 class GSM8KDataset(BaseDatasetLoader):
     """TODO: Implement GSM8K dataset loader."""
     def load(self):

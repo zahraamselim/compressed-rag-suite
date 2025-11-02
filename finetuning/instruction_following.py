@@ -9,6 +9,9 @@ Planned datasets:
 Implementation needed.
 """
 
+from finetuning.base import BaseDatasetLoader
+
+
 class AlpacaDataset(BaseDatasetLoader):
     """TODO: Implement Alpaca dataset loader."""
     def load(self):
