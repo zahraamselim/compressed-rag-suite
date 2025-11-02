@@ -38,26 +38,14 @@ ENV/
 .ipynb_checkpoints
 *.ipynb
 
-# Results and outputs
-results/
-rag_results*/
-rag_store*/
-*.json
-*.png
-*.jpg
-*.jpeg
+# Results
+notebooks/
 
 # Model files
 *.bin
 *.pt
 *.pth
 *.safetensors
-
-# Datasets
-*.pdf
-*.txt
-*.csv
-data/
 
 # ChromaDB
 chroma_db/
