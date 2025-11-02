@@ -1,8 +1,5 @@
 """
 Factory function for loading datasets by category.
-
-This file is already correct - it imports load_code_dataset from
-finetuning.code_generation, which we've already fixed.
 """
 
 def load_dataset(category: str, dataset_name: str, config=None):

@@ -5,7 +5,7 @@ import logging
 import torch
 from pathlib import Path
 
-from config_loader import ConfigLoader
+from utils.config_loader import ConfigLoader
 from models.model_interface import create_model_interface
 from rag.pipeline import RAGPipeline
 from evaluation.runner import EvaluationRunner 

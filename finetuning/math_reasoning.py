@@ -18,3 +18,19 @@ class GSM8KDataset(BaseDatasetLoader):
         raise NotImplementedError("GSM8K dataset not yet implemented")
     def get_info(self):
         raise NotImplementedError("GSM8K dataset not yet implemented")
+
+
+class MATHDataset(BaseDatasetLoader):
+    """TODO: Implement MATH dataset loader."""
+    def load(self):
+        raise NotImplementedError("MATH dataset not yet implemented")
+    def get_info(self):
+        raise NotImplementedError("MATH dataset not yet implemented")
+
+
+class MathQADataset(BaseDatasetLoader):
+    """TODO: Implement MathQA dataset loader."""
+    def load(self):
+        raise NotImplementedError("MathQA dataset not yet implemented")
+    def get_info(self):
+        raise NotImplementedError("MathQA dataset not yet implemented")

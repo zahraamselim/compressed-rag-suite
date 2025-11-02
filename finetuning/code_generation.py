@@ -6,8 +6,6 @@ Available datasets:
 2. MBPP - Mostly Basic Python Problems
 3. CodeAlpaca - Instruction-tuning for code
 4. CodeContests - Competitive programming
-
-Fixed: Import HuggingFace datasets library with alias to avoid circular import
 """
 
 from datasets import load_dataset as hf_load_dataset  # Fixed: use alias

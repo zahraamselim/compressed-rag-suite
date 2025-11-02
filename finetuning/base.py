@@ -1,8 +1,5 @@
 """
 Base classes for dataset loaders.
-
-This module is self-contained and doesn't import from other finetuning modules,
-so no changes needed after renaming datasets → finetuning.
 """
 
 from abc import ABC, abstractmethod

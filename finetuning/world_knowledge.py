@@ -18,3 +18,19 @@ class MMLUDataset(BaseDatasetLoader):
         raise NotImplementedError("MMLU dataset not yet implemented")
     def get_info(self):
         raise NotImplementedError("MMLU dataset not yet implemented")
+
+
+class TriviaQADataset(BaseDatasetLoader):
+    """TODO: Implement TriviaQA dataset loader."""
+    def load(self):
+        raise NotImplementedError("TriviaQA dataset not yet implemented")
+    def get_info(self):
+        raise NotImplementedError("TriviaQA dataset not yet implemented")
+
+
+class NaturalQuestionsDataset(BaseDatasetLoader):
+    """TODO: Implement NaturalQuestions dataset loader."""
+    def load(self):
+        raise NotImplementedError("NaturalQuestions dataset not yet implemented")
+    def get_info(self):
+        raise NotImplementedError("NaturalQuestions dataset not yet implemented")

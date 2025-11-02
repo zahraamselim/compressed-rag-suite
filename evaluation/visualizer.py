@@ -1,395 +1,572 @@
-"""
-Visualization utilities for model evaluation results.
-Place in: evaluation/visualizer.py
-"""
+"""Visualization tool for evaluation results."""
 
-import matplotlib.pyplot as plt
-import pandas as pd
+import json
+import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import List, Dict, Any, Optional, Tuple
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+# Check for matplotlib
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    logger.warning("matplotlib not available. Install with: pip install matplotlib")
+
+# Check for seaborn
+try:
+    import seaborn as sns
+    SEABORN_AVAILABLE = True
+    sns.set_style("whitegrid")
+except ImportError:
+    SEABORN_AVAILABLE = False
+    logger.info("seaborn not available (optional). Install with: pip install seaborn")
 
 
-class EvaluationVisualizer:
-    """Create comprehensive visualizations for model evaluation results."""
+class ResultsVisualizer:
+    """Visualize and compare evaluation results."""
     
-    @staticmethod
-    def create_comprehensive_plot(
-        results: Any,
-        model_info: Dict[str, Any],
-        vram_used: float,
-        quantization_type: str,
-        save_path: Optional[Path] = None,
-        figsize: tuple = (15, 12)
-    ):
+    def __init__(self, style: str = 'default'):
         """
-        Create a comprehensive 2x2 plot with all evaluation metrics.
+        Initialize visualizer.
         
         Args:
-            results: EvaluationResults object
-            model_info: Dictionary with model information
-            vram_used: VRAM usage in GB
-            quantization_type: Type of quantization (e.g., 'GPTQ 4-bit')
-            save_path: Path to save the figure
-            figsize: Figure size tuple
+            style: Matplotlib style ('default', 'seaborn', 'dark_background')
         """
-        fig, axes = plt.subplots(2, 2, figsize=figsize)
-        fig.suptitle(
-            f'Mistral 7B {quantization_type} - Comprehensive Evaluation',
-            fontsize=16,
-            fontweight='bold'
-        )
+        if not MATPLOTLIB_AVAILABLE:
+            raise ImportError("matplotlib required. Install with: pip install matplotlib")
         
-        # 1. Performance benchmarks (top-left)
-        EvaluationVisualizer._plot_performance_benchmarks(
-            axes[0, 0], 
-            results.performance
-        )
+        self.results = []
+        self.result_names = []
+        self.colors = plt.cm.tab10.colors
         
-        # 2. RAG comparison (top-right)
-        EvaluationVisualizer._plot_rag_metrics(
-            axes[0, 1],
-            results.retrieval
-        )
-        
-        # 3. Efficiency metrics (bottom-left)
-        EvaluationVisualizer._plot_efficiency_metrics(
-            axes[1, 0],
-            results.efficiency
-        )
-        
-        # 4. Summary statistics (bottom-right)
-        EvaluationVisualizer._plot_summary_text(
-            axes[1, 1],
-            results,
-            model_info,
-            vram_used,
-            quantization_type
-        )
-        
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            
-        return fig
+        if style == 'seaborn' and SEABORN_AVAILABLE:
+            sns.set_style("whitegrid")
+        elif style != 'default':
+            plt.style.use(style)
     
-    @staticmethod
-    def _plot_performance_benchmarks(ax, performance_results):
-        """Plot LM-Eval benchmark scores."""
-        if not performance_results or not performance_results.lm_eval_scores:
-            ax.text(0.5, 0.5, 'No performance data', 
-                   ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('LM-Eval Benchmark Scores')
-            return
+    def load_result(self, filepath: str, name: Optional[str] = None):
+        """Load a single result file."""
+        path = Path(filepath)
+        if not path.exists():
+            raise FileNotFoundError(f"Result file not found: {filepath}")
         
-        tasks = list(performance_results.lm_eval_scores.keys())
-        scores = [performance_results.lm_eval_scores[t] * 100 for t in tasks]
+        with open(path, 'r') as f:
+            result = json.load(f)
         
-        bars = ax.barh(tasks, scores, color='steelblue', alpha=0.8)
-        ax.set_xlabel('Accuracy (%)')
-        ax.set_title('LM-Eval Benchmark Scores')
-        ax.grid(axis='x', alpha=0.3)
+        result_name = name or path.stem
+        self.results.append(result)
+        self.result_names.append(result_name)
         
-        # Add value labels
-        for i, (bar, score) in enumerate(zip(bars, scores)):
-            ax.text(score + 1, i, f'{score:.1f}%', va='center', fontsize=9)
+        logger.info(f"Loaded result: {result_name}")
     
-    @staticmethod
-    def _plot_rag_metrics(ax, retrieval_results):
-        """Plot RAG performance metrics."""
-        if not retrieval_results:
-            ax.text(0.5, 0.5, 'No RAG data',
-                   ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('RAG Performance Metrics')
-            return
+    def load_results(self, filepaths: List[str], names: Optional[List[str]] = None):
+        """Load multiple result files."""
+        if names and len(names) != len(filepaths):
+            raise ValueError("Length of names must match filepaths")
         
-        metrics = ['F1', 'EM', 'Relevance', 'Precision', 'Recall']
-        rag_scores = [
-            retrieval_results.f1_score,
-            retrieval_results.exact_match,
-            retrieval_results.answer_relevance,
-            retrieval_results.context_precision,
-            retrieval_results.context_recall
-        ]
-        
-        x = range(len(metrics))
-        ax.bar(x, rag_scores, color='forestgreen', alpha=0.8, label='RAG')
-        
-        # Add No-RAG comparison if available
-        if retrieval_results.no_rag_f1:
-            no_rag_scores = [
-                retrieval_results.no_rag_f1,
-                retrieval_results.no_rag_exact_match
-            ] + [0] * 3
-            ax.bar([0, 1], no_rag_scores[:2], 
-                  color='coral', alpha=0.8, label='No-RAG')
-        
-        ax.set_xticks(x)
-        ax.set_xticklabels(metrics, rotation=45, ha='right')
-        ax.set_ylabel('Score')
-        ax.set_title('RAG Performance Metrics')
-        ax.legend()
-        ax.grid(axis='y', alpha=0.3)
-        ax.set_ylim(0, 1.0)
+        for i, filepath in enumerate(filepaths):
+            name = names[i] if names else None
+            self.load_result(filepath, name)
     
-    @staticmethod
-    def _plot_efficiency_metrics(ax, efficiency_results):
-        """Plot efficiency metrics."""
-        if not efficiency_results:
-            ax.text(0.5, 0.5, 'No efficiency data',
-                   ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('Efficiency Metrics')
-            return
+    def _find_metric_value(self, result: Dict, metric: str) -> Optional[float]:
+        """Find a metric value in nested dictionary."""
+        # Direct key
+        if metric in result and isinstance(result[metric], (int, float)):
+            return float(result[metric])
         
-        metrics = ['Latency\n(ms)', 'Throughput\n(tok/s)', 'Memory\n(GB)']
-        values = [
-            efficiency_results.latency.mean_ms,
-            efficiency_results.throughput.tokens_per_second,
-            efficiency_results.memory.peak_allocated_gb
-        ]
-        colors = ['skyblue', 'lightcoral', 'lightgreen']
+        # Search in nested dicts
+        for key, value in result.items():
+            if isinstance(value, dict) and metric in value:
+                nested_val = value[metric]
+                if isinstance(nested_val, (int, float)):
+                    return float(nested_val)
         
-        bars = ax.bar(metrics, values, color=colors, alpha=0.8)
-        ax.set_ylabel('Value')
-        ax.set_title('Efficiency Metrics')
-        ax.grid(axis='y', alpha=0.3)
-        
-        # Add value labels
-        for bar, value in zip(bars, values):
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height,
-                   f'{value:.2f}',
-                   ha='center', va='bottom', fontsize=9)
+        return None
     
-    @staticmethod
-    def _plot_summary_text(ax, results, model_info, vram_used, quantization_type):
-        """Plot summary statistics as text."""
-        ax.axis('off')
-        
-        # Build summary text
-        summary_lines = [
-            "MODEL SUMMARY",
-            "=" * 40,
-            "",
-            f"Quantization: {quantization_type}",
-            f"Model Size: {model_info['size_gb']:.2f} GB",
-            f"VRAM Usage: {vram_used:.2f} GB",
-            f"Parameters: {model_info['num_parameters']:,}",
-            "",
-            "PERFORMANCE",
-            "=" * 40,
-        ]
-        
-        if results.performance and results.performance.average_accuracy:
-            summary_lines.append(
-                f"Avg Accuracy: {results.performance.average_accuracy*100:.2f}%"
-            )
-        
-        summary_lines.extend([
-            "",
-            "EFFICIENCY",
-            "=" * 40,
-        ])
-        
-        if results.efficiency:
-            summary_lines.extend([
-                f"Latency: {results.efficiency.latency.mean_ms:.2f}ms",
-                f"Throughput: {results.efficiency.throughput.tokens_per_second:.2f} tok/s",
-            ])
-        
-        summary_lines.extend([
-            "",
-            "RAG PERFORMANCE",
-            "=" * 40,
-        ])
-        
-        if results.retrieval:
-            summary_lines.append(f"F1 Score: {results.retrieval.f1_score:.4f}")
-            if results.retrieval.no_rag_f1:
-                improvement = (results.retrieval.f1_score - 
-                             results.retrieval.no_rag_f1) * 100
-                summary_lines.append(f"RAG Improvement: {improvement:+.2f}%")
-        
-        summary_text = "\n".join(summary_lines)
-        
-        ax.text(0.1, 0.9, summary_text, 
-               transform=ax.transAxes,
-               fontsize=10,
-               verticalalignment='top',
-               fontfamily='monospace',
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
-    
-    @staticmethod
-    def create_comparison_plot(
-        results_dict: Dict[str, Any],
-        metric: str = 'f1_score',
-        save_path: Optional[Path] = None,
-        figsize: tuple = (12, 6)
+    def plot_metric_comparison(
+        self,
+        metrics: List[str],
+        title: str = "Metric Comparison",
+        ylabel: str = "Value",
+        figsize: Tuple[int, int] = (12, 6),
+        save_path: Optional[str] = None
     ):
         """
-        Create comparison plot across multiple quantization methods.
+        Create bar chart comparing metrics across results.
         
         Args:
-            results_dict: Dict mapping model names to results objects
-            metric: Metric to compare ('f1_score', 'accuracy', 'latency', etc.)
-            save_path: Path to save the figure
-            figsize: Figure size tuple
+            metrics: List of metric names to compare
+            title: Plot title
+            ylabel: Y-axis label
+            figsize: Figure size (width, height)
+            save_path: Optional path to save figure
         """
+        if not self.results:
+            logger.warning("No results loaded")
+            return
+        
         fig, ax = plt.subplots(figsize=figsize)
         
-        model_names = list(results_dict.keys())
-        values = []
+        x = np.arange(len(metrics))
+        width = 0.8 / len(self.results)
         
-        for name, results in results_dict.items():
-            if metric == 'f1_score' and results.retrieval:
-                values.append(results.retrieval.f1_score)
-            elif metric == 'accuracy' and results.performance:
-                values.append(results.performance.average_accuracy)
-            elif metric == 'latency' and results.efficiency:
-                values.append(results.efficiency.latency.mean_ms)
-            elif metric == 'throughput' and results.efficiency:
-                values.append(results.efficiency.throughput.tokens_per_second)
-            else:
-                values.append(0)
+        for i, (result, name) in enumerate(zip(self.results, self.result_names)):
+            values = []
+            for metric in metrics:
+                value = self._find_metric_value(result, metric)
+                values.append(value if value is not None else 0.0)
+            
+            offset = (i - len(self.results)/2 + 0.5) * width
+            ax.bar(x + offset, values, width, label=name, color=self.colors[i % len(self.colors)])
         
-        bars = ax.bar(model_names, values, alpha=0.8)
-        ax.set_ylabel(metric.replace('_', ' ').title())
-        ax.set_title(f'Quantization Method Comparison - {metric.replace("_", " ").title()}')
+        ax.set_xlabel('Metrics', fontsize=12)
+        ax.set_ylabel(ylabel, fontsize=12)
+        ax.set_title(title, fontsize=14, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(metrics, rotation=45, ha='right')
+        ax.legend()
         ax.grid(axis='y', alpha=0.3)
         
-        # Add value labels
-        for bar, value in zip(bars, values):
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height,
-                   f'{value:.4f}' if value < 10 else f'{value:.2f}',
-                   ha='center', va='bottom')
-        
         plt.tight_layout()
         
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        
-        return fig
-    
-    @staticmethod
-    def create_efficiency_comparison(
-        results_dict: Dict[str, Any],
-        save_path: Optional[Path] = None,
-        figsize: tuple = (14, 8)
-    ):
-        """Create comprehensive efficiency comparison plot."""
-        fig, axes = plt.subplots(2, 2, figsize=figsize)
-        fig.suptitle('Efficiency Metrics Comparison', fontsize=16, fontweight='bold')
-        
-        model_names = list(results_dict.keys())
-        
-        # Latency
-        latencies = [r.efficiency.latency.mean_ms if r.efficiency else 0 
-                    for r in results_dict.values()]
-        axes[0, 0].bar(model_names, latencies, color='skyblue', alpha=0.8)
-        axes[0, 0].set_ylabel('Latency (ms)')
-        axes[0, 0].set_title('Inference Latency')
-        axes[0, 0].grid(axis='y', alpha=0.3)
-        
-        # Throughput
-        throughputs = [r.efficiency.throughput.tokens_per_second if r.efficiency else 0
-                      for r in results_dict.values()]
-        axes[0, 1].bar(model_names, throughputs, color='lightcoral', alpha=0.8)
-        axes[0, 1].set_ylabel('Tokens/second')
-        axes[0, 1].set_title('Throughput')
-        axes[0, 1].grid(axis='y', alpha=0.3)
-        
-        # Memory
-        memories = [r.efficiency.memory.peak_allocated_gb if r.efficiency else 0
-                   for r in results_dict.values()]
-        axes[1, 0].bar(model_names, memories, color='lightgreen', alpha=0.8)
-        axes[1, 0].set_ylabel('Memory (GB)')
-        axes[1, 0].set_title('Peak Memory Usage')
-        axes[1, 0].grid(axis='y', alpha=0.3)
-        
-        # Combined radar plot (if more than 2 models)
-        if len(model_names) >= 2:
-            EvaluationVisualizer._plot_efficiency_radar(
-                axes[1, 1], model_names, results_dict
-            )
+            logger.info(f"Saved plot to {save_path}")
         else:
-            axes[1, 1].axis('off')
+            plt.show()
         
+        plt.close()
+    
+    def plot_efficiency_comparison(
+        self,
+        figsize: Tuple[int, int] = (14, 8),
+        save_path: Optional[str] = None
+    ):
+        """
+        Create comprehensive efficiency comparison plot.
+        
+        Shows latency, throughput, memory, and energy metrics.
+        """
+        if not self.results:
+            logger.warning("No results loaded")
+            return
+        
+        efficiency_metrics = {
+            'Latency (ms/tok)': 'latency_ms_per_token',
+            'Throughput (tok/s)': 'throughput_tokens_per_sec',
+            'Peak Memory (GB)': 'peak_memory_mb',
+            'Energy (mJ/tok)': 'energy_per_token_mj'
+        }
+        
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        axes = axes.flatten()
+        
+        for idx, (label, metric) in enumerate(efficiency_metrics.items()):
+            ax = axes[idx]
+            
+            values = []
+            names = []
+            for result, name in zip(self.results, self.result_names):
+                value = self._find_metric_value(result, metric)
+                if value is not None:
+                    # Convert memory to GB if needed
+                    if metric == 'peak_memory_mb':
+                        value = value / 1024
+                    values.append(value)
+                    names.append(name)
+            
+            if values:
+                colors_subset = [self.colors[i % len(self.colors)] for i in range(len(values))]
+                bars = ax.bar(names, values, color=colors_subset, alpha=0.8)
+                
+                # Add value labels on bars
+                for bar in bars:
+                    height = bar.get_height()
+                    ax.text(bar.get_x() + bar.get_width()/2., height,
+                           f'{height:.2f}',
+                           ha='center', va='bottom', fontsize=9)
+                
+                ax.set_title(label, fontsize=11, fontweight='bold')
+                ax.set_ylabel('Value', fontsize=10)
+                ax.tick_params(axis='x', rotation=45)
+                ax.grid(axis='y', alpha=0.3)
+        
+        plt.suptitle('Efficiency Comparison', fontsize=14, fontweight='bold', y=1.00)
         plt.tight_layout()
         
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            logger.info(f"Saved plot to {save_path}")
+        else:
+            plt.show()
         
-        return fig
+        plt.close()
     
-    @staticmethod
-    def _plot_efficiency_radar(ax, model_names, results_dict):
-        """Create radar plot for efficiency metrics."""
-        import numpy as np
+    def plot_performance_comparison(
+        self,
+        figsize: Tuple[int, int] = (14, 6),
+        save_path: Optional[str] = None
+    ):
+        """
+        Create performance benchmark comparison.
         
-        categories = ['Latency\n(lower better)', 'Throughput', 'Memory\n(lower better)']
-        N = len(categories)
+        Shows perplexity and accuracy metrics.
+        """
+        if not self.results:
+            logger.warning("No results loaded")
+            return
         
-        angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
-        angles += angles[:1]
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
         
-        ax = plt.subplot(2, 2, 4, projection='polar')
+        # Perplexity
+        perplexities = []
+        names_with_ppl = []
+        for result, name in zip(self.results, self.result_names):
+            ppl = self._find_metric_value(result, 'perplexity')
+            if ppl is not None:
+                perplexities.append(ppl)
+                names_with_ppl.append(name)
         
-        for name, results in results_dict.items():
-            if not results.efficiency:
-                continue
+        if perplexities:
+            colors_subset = [self.colors[i % len(self.colors)] for i in range(len(perplexities))]
+            bars = ax1.bar(names_with_ppl, perplexities, color=colors_subset, alpha=0.8)
             
-            # Normalize values (0-1, where 1 is best)
-            lat_norm = 1 - (results.efficiency.latency.mean_ms / 100)  # Assume 100ms baseline
-            thr_norm = results.efficiency.throughput.tokens_per_second / 100  # Assume 100 tok/s baseline
-            mem_norm = 1 - (results.efficiency.memory.peak_allocated_gb / 10)  # Assume 10GB baseline
+            for bar in bars:
+                height = bar.get_height()
+                ax1.text(bar.get_x() + bar.get_width()/2., height,
+                        f'{height:.2f}',
+                        ha='center', va='bottom', fontsize=9)
             
-            values = [max(0, min(1, lat_norm)), 
-                     max(0, min(1, thr_norm)),
-                     max(0, min(1, mem_norm))]
-            values += values[:1]
+            ax1.set_title('Perplexity (lower is better)', fontsize=11, fontweight='bold')
+            ax1.set_ylabel('Perplexity', fontsize=10)
+            ax1.tick_params(axis='x', rotation=45)
+            ax1.grid(axis='y', alpha=0.3)
+        
+        # Average accuracy
+        accuracies = []
+        names_with_acc = []
+        for result, name in zip(self.results, self.result_names):
+            acc = self._find_metric_value(result, 'average_accuracy')
+            if acc is not None:
+                accuracies.append(acc * 100)  # Convert to percentage
+                names_with_acc.append(name)
+        
+        if accuracies:
+            colors_subset = [self.colors[i % len(self.colors)] for i in range(len(accuracies))]
+            bars = ax2.bar(names_with_acc, accuracies, color=colors_subset, alpha=0.8)
             
-            ax.plot(angles, values, 'o-', linewidth=2, label=name)
-            ax.fill(angles, values, alpha=0.15)
+            for bar in bars:
+                height = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width()/2., height,
+                        f'{height:.1f}%',
+                        ha='center', va='bottom', fontsize=9)
+            
+            ax2.set_title('Average Accuracy (higher is better)', fontsize=11, fontweight='bold')
+            ax2.set_ylabel('Accuracy (%)', fontsize=10)
+            ax2.tick_params(axis='x', rotation=45)
+            ax2.grid(axis='y', alpha=0.3)
+        
+        plt.suptitle('Performance Comparison', fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            logger.info(f"Saved plot to {save_path}")
+        else:
+            plt.show()
+        
+        plt.close()
+    
+    def plot_retrieval_comparison(
+        self,
+        figsize: Tuple[int, int] = (14, 8),
+        save_path: Optional[str] = None
+    ):
+        """Create RAG/retrieval metrics comparison."""
+        if not self.results:
+            logger.warning("No results loaded")
+            return
+        
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        axes = axes.flatten()
+        
+        # Precision@K
+        k_values = [1, 3, 5, 10]
+        ax = axes[0]
+        for i, (result, name) in enumerate(zip(self.results, self.result_names)):
+            precisions = []
+            for k in k_values:
+                p = self._find_metric_value(result, f'precision_at_{k}')
+                precisions.append(p if p is not None else 0.0)
+            
+            ax.plot(k_values, precisions, marker='o', label=name, 
+                   color=self.colors[i % len(self.colors)], linewidth=2)
+        
+        ax.set_title('Precision@K', fontsize=11, fontweight='bold')
+        ax.set_xlabel('K', fontsize=10)
+        ax.set_ylabel('Precision', fontsize=10)
+        ax.legend()
+        ax.grid(alpha=0.3)
+        
+        # Answer quality metrics
+        ax = axes[1]
+        answer_metrics = ['exact_match', 'f1_score', 'faithfulness']
+        x = np.arange(len(answer_metrics))
+        width = 0.8 / len(self.results)
+        
+        for i, (result, name) in enumerate(zip(self.results, self.result_names)):
+            values = []
+            for metric in answer_metrics:
+                value = self._find_metric_value(result, metric)
+                values.append(value if value is not None else 0.0)
+            
+            offset = (i - len(self.results)/2 + 0.5) * width
+            ax.bar(x + offset, values, width, label=name, 
+                  color=self.colors[i % len(self.colors)])
+        
+        ax.set_title('Answer Quality', fontsize=11, fontweight='bold')
+        ax.set_ylabel('Score', fontsize=10)
+        ax.set_xticks(x)
+        ax.set_xticklabels(answer_metrics, rotation=30, ha='right')
+        ax.legend()
+        ax.grid(axis='y', alpha=0.3)
+        
+        # Context metrics
+        ax = axes[2]
+        context_metrics = ['context_sufficiency', 'context_precision', 'context_coverage']
+        x = np.arange(len(context_metrics))
+        
+        for i, (result, name) in enumerate(zip(self.results, self.result_names)):
+            values = []
+            for metric in context_metrics:
+                value = self._find_metric_value(result, metric)
+                values.append(value if value is not None else 0.0)
+            
+            offset = (i - len(self.results)/2 + 0.5) * width
+            ax.bar(x + offset, values, width, label=name,
+                  color=self.colors[i % len(self.colors)])
+        
+        ax.set_title('Context Quality', fontsize=11, fontweight='bold')
+        ax.set_ylabel('Score', fontsize=10)
+        ax.set_xticks(x)
+        ax.set_xticklabels(context_metrics, rotation=30, ha='right')
+        ax.legend()
+        ax.grid(axis='y', alpha=0.3)
+        
+        # Timing comparison
+        ax = axes[3]
+        timing_metrics = ['avg_retrieval_time_ms', 'avg_rag_generation_time_ms']
+        timing_labels = ['Retrieval', 'Generation']
+        x = np.arange(len(timing_labels))
+        
+        for i, (result, name) in enumerate(zip(self.results, self.result_names)):
+            values = []
+            for metric in timing_metrics:
+                value = self._find_metric_value(result, metric)
+                values.append(value if value is not None else 0.0)
+            
+            offset = (i - len(self.results)/2 + 0.5) * width
+            ax.bar(x + offset, values, width, label=name,
+                  color=self.colors[i % len(self.colors)])
+        
+        ax.set_title('RAG Timing', fontsize=11, fontweight='bold')
+        ax.set_ylabel('Time (ms)', fontsize=10)
+        ax.set_xticks(x)
+        ax.set_xticklabels(timing_labels)
+        ax.legend()
+        ax.grid(axis='y', alpha=0.3)
+        
+        plt.suptitle('Retrieval/RAG Comparison', fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            logger.info(f"Saved plot to {save_path}")
+        else:
+            plt.show()
+        
+        plt.close()
+    
+    def plot_radar_chart(
+        self,
+        metrics: List[str],
+        title: str = "Performance Radar",
+        figsize: Tuple[int, int] = (10, 10),
+        save_path: Optional[str] = None
+    ):
+        """
+        Create radar chart for multi-dimensional comparison.
+        
+        Args:
+            metrics: List of metrics to include (3-8 recommended)
+            title: Plot title
+            figsize: Figure size
+            save_path: Optional path to save
+        """
+        if not self.results:
+            logger.warning("No results loaded")
+            return
+        
+        if len(metrics) < 3:
+            logger.warning("Radar chart needs at least 3 metrics")
+            return
+        
+        fig, ax = plt.subplots(figsize=figsize, subplot_kw=dict(projection='polar'))
+        
+        angles = np.linspace(0, 2 * np.pi, len(metrics), endpoint=False).tolist()
+        angles += angles[:1]  # Complete the circle
+        
+        for i, (result, name) in enumerate(zip(self.results, self.result_names)):
+            values = []
+            for metric in metrics:
+                value = self._find_metric_value(result, metric)
+                values.append(value if value is not None else 0.0)
+            
+            # Normalize values to 0-1 range
+            max_vals = [max(self._find_metric_value(r, m) or 0.0 for r in self.results) 
+                       for m in metrics]
+            normalized = [v / max_v if max_v > 0 else 0 
+                         for v, max_v in zip(values, max_vals)]
+            normalized += normalized[:1]  # Complete the circle
+            
+            ax.plot(angles, normalized, 'o-', linewidth=2, label=name,
+                   color=self.colors[i % len(self.colors)])
+            ax.fill(angles, normalized, alpha=0.15, 
+                   color=self.colors[i % len(self.colors)])
         
         ax.set_xticks(angles[:-1])
-        ax.set_xticklabels(categories, size=8)
+        ax.set_xticklabels(metrics, size=10)
         ax.set_ylim(0, 1)
-        ax.set_title('Efficiency Profile', size=10, pad=20)
+        ax.set_title(title, size=14, fontweight='bold', pad=20)
         ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
         ax.grid(True)
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            logger.info(f"Saved plot to {save_path}")
+        else:
+            plt.show()
+        
+        plt.close()
+    
+    def create_dashboard(
+        self,
+        output_dir: str = './visualizations'
+    ):
+        """
+        Create a complete dashboard with all visualizations.
+        
+        Args:
+            output_dir: Directory to save all plots
+        """
+        if not self.results:
+            logger.warning("No results loaded")
+            return
+        
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Creating dashboard in {output_dir}...")
+        
+        # Efficiency comparison
+        try:
+            self.plot_efficiency_comparison(
+                save_path=str(output_path / 'efficiency_comparison.png')
+            )
+        except Exception as e:
+            logger.error(f"Failed to create efficiency plot: {e}")
+        
+        # Performance comparison
+        try:
+            self.plot_performance_comparison(
+                save_path=str(output_path / 'performance_comparison.png')
+            )
+        except Exception as e:
+            logger.error(f"Failed to create performance plot: {e}")
+        
+        # Retrieval comparison
+        try:
+            self.plot_retrieval_comparison(
+                save_path=str(output_path / 'retrieval_comparison.png')
+            )
+        except Exception as e:
+            logger.error(f"Failed to create retrieval plot: {e}")
+        
+        # Radar chart
+        try:
+            radar_metrics = [
+                'latency_ms_per_token',
+                'throughput_tokens_per_sec',
+                'average_accuracy',
+                'exact_match',
+                'f1_score'
+            ]
+            self.plot_radar_chart(
+                metrics=radar_metrics,
+                title="Overall Performance Radar",
+                save_path=str(output_path / 'radar_comparison.png')
+            )
+        except Exception as e:
+            logger.error(f"Failed to create radar chart: {e}")
+        
+        logger.info(f"Dashboard created in {output_dir}")
 
 
-# Example usage:
-"""
-from evaluation.visualizer import EvaluationVisualizer
+def main():
+    """CLI interface for visualizer."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Visualize evaluation results')
+    parser.add_argument('files', nargs='+', help='JSON result files')
+    parser.add_argument('--names', nargs='+', help='Custom names for results')
+    parser.add_argument('--output-dir', default='./visualizations',
+                       help='Output directory for plots')
+    parser.add_argument('--dashboard', action='store_true',
+                       help='Create complete dashboard')
+    parser.add_argument('--efficiency', action='store_true',
+                       help='Create efficiency comparison plot')
+    parser.add_argument('--performance', action='store_true',
+                       help='Create performance comparison plot')
+    parser.add_argument('--retrieval', action='store_true',
+                       help='Create retrieval comparison plot')
+    parser.add_argument('--style', default='default',
+                       help='Plot style (default, seaborn, dark_background)')
+    
+    args = parser.parse_args()
+    
+    visualizer = ResultsVisualizer(style=args.style)
+    visualizer.load_results(args.files, args.names)
+    
+    if args.dashboard:
+        visualizer.create_dashboard(args.output_dir)
+    else:
+        output_path = Path(args.output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        if args.efficiency:
+            visualizer.plot_efficiency_comparison(
+                save_path=str(output_path / 'efficiency_comparison.png')
+            )
+        if args.performance:
+            visualizer.plot_performance_comparison(
+                save_path=str(output_path / 'performance_comparison.png')
+            )
+        if args.retrieval:
+            visualizer.plot_retrieval_comparison(
+                save_path=str(output_path / 'retrieval_comparison.png')
+            )
+        
+        if not any([args.efficiency, args.performance, args.retrieval]):
+            # Default: show all
+            visualizer.create_dashboard(args.output_dir)
 
-# Single model visualization
-fig = EvaluationVisualizer.create_comprehensive_plot(
-    results=results,
-    model_info=info,
-    vram_used=vram_used,
-    quantization_type='GPTQ 4-bit',
-    save_path=RESULTS_DIR / 'evaluation_summary.png'
-)
-plt.show()
 
-# Multi-model comparison
-results_dict = {
-    'GPTQ': gptq_results,
-    'AWQ': awq_results,
-    'HQQ': hqq_results,
-    'NF4': nf4_results
-}
-
-fig = EvaluationVisualizer.create_comparison_plot(
-    results_dict=results_dict,
-    metric='f1_score',
-    save_path=Path('./comparison_f1.png')
-)
-
-fig = EvaluationVisualizer.create_efficiency_comparison(
-    results_dict=results_dict,
-    save_path=Path('./efficiency_comparison.png')
-)
-"""
+if __name__ == "__main__":
+    main()
