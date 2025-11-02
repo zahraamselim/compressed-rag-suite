@@ -128,62 +128,63 @@ class ModelInterface(ABC):
         return self.get_lm_eval_model() is not None
 
 
-    def create_model_interface(model_type: str = "huggingface") -> ModelInterface:
-        """
-        Factory function to create appropriate model interface.
+def create_model_interface(model_type: str = "huggingface"):
+    """
+    Factory function to create appropriate model interface.
+    
+    Args:
+        model_type: Type of model interface
+            - 'huggingface' or 'hf': Standard HuggingFace models (FP16, INT8, NF4)
+            - 'gptq': GPTQ 4-bit quantized models
+            - 'awq': AWQ 4-bit quantized models
+            - 'hqq': HQQ quantized models (2/3/4/8-bit)
         
-        Args:
-            model_type: Type of model interface
-                - 'huggingface' or 'hf': Standard HuggingFace models (FP16, INT8, NF4)
-                - 'gptq': GPTQ 4-bit quantized models
-                - 'awq': AWQ 4-bit quantized models
-                - 'hqq': HQQ quantized models (2/3/4/8-bit)
-            
-        Returns:
-            ModelInterface instance
+    Returns:
+        ModelInterface instance
+    
+    Examples:
+        >>> # Standard HuggingFace model
+        >>> model_interface = create_model_interface('huggingface')
+        >>> model_interface.load('mistralai/Mistral-7B-Instruct-v0.1')
         
-        Examples:
-            >>> # Standard HuggingFace model
-            >>> model_interface = create_model_interface('huggingface')
-            >>> model_interface.load('mistralai/Mistral-7B-Instruct-v0.1')
-            
-            >>> # GPTQ quantized model
-            >>> model_interface = create_model_interface('gptq')
-            >>> model_interface.load('TheBloke/Mistral-7B-Instruct-v0.1-GPTQ')
-            
-            >>> # AWQ quantized model
-            >>> model_interface = create_model_interface('awq')
-            >>> model_interface.load('TheBloke/Mistral-7B-Instruct-v0.1-AWQ')
-            
-            >>> # HQQ quantized model (quantize on-the-fly)
-            >>> model_interface = create_model_interface('hqq')
-            >>> model_interface.load('mistralai/Mistral-7B-Instruct-v0.1', nbits=4)
-        """
-        model_type = model_type.lower()
+        >>> # GPTQ quantized model
+        >>> model_interface = create_model_interface('gptq')
+        >>> model_interface.load('TheBloke/Mistral-7B-Instruct-v0.1-GPTQ')
         
-        if model_type in ['huggingface', 'hf']:
-            from models.huggingface_model import HuggingFaceModel
-            return HuggingFaceModel()
+        >>> # AWQ quantized model
+        >>> model_interface = create_model_interface('awq')
+        >>> model_interface.load('TheBloke/Mistral-7B-Instruct-v0.1-AWQ')
         
-        elif model_type == 'gptq':
-            from models.quantized_models import GPTQModel
-            return GPTQModel()
-        
-        elif model_type == 'awq':
-            from models.quantized_models import AWQModel
-            return AWQModel()
-        
-        elif model_type == 'hqq':
-            from models.quantized_models import HQQModel
-            return HQQModel()
-        
-        else:
-            raise ValueError(
-                f"Unknown model type: {model_type}. "
-                f"Available: huggingface, gptq, awq, hqq"
-            )
+        >>> # HQQ quantized model (quantize on-the-fly)
+        >>> model_interface = create_model_interface('hqq')
+        >>> model_interface.load('mistralai/Mistral-7B-Instruct-v0.1', nbits=4)
+    """
+    model_type = model_type.lower()
+    
+    if model_type in ['huggingface', 'hf']:
+        from models.huggingface_model import HuggingFaceModel
+        return HuggingFaceModel()
+    
+    elif model_type == 'gptq':
+        from models.gptq_model import GPTQModel
+        return GPTQModel()
+    
+    elif model_type == 'awq':
+        from models.awq_model import AWQModel
+        return AWQModel()
+    
+    elif model_type == 'hqq':
+        from models.hqq_model import HQQModel
+        return HQQModel()
+    
+    else:
+        raise ValueError(
+            f"Unknown model type: {model_type}. "
+            f"Available: huggingface, gptq, awq, hqq"
+        )
 
-    def list_available_models():
-        """List all available model types."""
-        available = ['huggingface', 'gptq', 'awq', 'hqq']
-        return available
+
+def list_available_models():
+    """List all available model types."""
+    available = ['huggingface', 'gptq', 'awq', 'hqq']
+    return available
