@@ -1,12 +1,12 @@
-"""Retrieval benchmark orchestrator """
+"""Retrieval benchmark orchestrator with detailed response saving."""
 
 import logging
+import json
+import pandas as pd
+from pathlib import Path
 import numpy as np
 from typing import List, Optional, Dict, Any, Set, Tuple
 from dataclasses import dataclass
-from pathlib import Path
-import json
-import re
 
 from evaluation.base import ModelBenchmark, BenchmarkResult
 from evaluation.retrieval.retrieval_metrics import RetrievalMetrics
@@ -34,18 +34,18 @@ class RetrievalResults(BenchmarkResult):
     mrr: Optional[float] = None
     map_score: Optional[float] = None
     
-    # QA-style context quality metrics (don't need relevant_doc_ids!)
-    context_sufficiency: Optional[float] = None  # Does context contain answer?
-    context_precision: Optional[float] = None  # How much is relevant?
-    context_coverage: Optional[float] = None  # % of answer tokens in context
-    avg_context_length: Optional[float] = None  # Average context length in tokens
+    # QA-style context quality metrics
+    context_sufficiency: Optional[float] = None
+    context_precision: Optional[float] = None
+    context_coverage: Optional[float] = None
+    avg_context_length: Optional[float] = None
     
-    # Retrieval consistency metrics (always available)
+    # Retrieval consistency metrics
     avg_retrieval_score: Optional[float] = None
     retrieval_consistency: Optional[float] = None
     avg_chunks_retrieved: Optional[float] = None
     
-    # Answer quality metrics (need ground_truth_answers)
+    # Answer quality metrics
     exact_match: Optional[float] = None
     f1_score: Optional[float] = None
     answer_relevance: Optional[float] = None
@@ -63,7 +63,7 @@ class RetrievalResults(BenchmarkResult):
     em_improvement: Optional[float] = None
     
     # Metadata
-    evaluation_mode: Optional[str] = None  # 'ir' or 'qa'
+    evaluation_mode: Optional[str] = None
     num_questions: Optional[int] = None
 
 
@@ -73,6 +73,8 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
     
     Mode 1 (IR): Traditional IR metrics (needs relevant_doc_ids)
     Mode 2 (QA): Context quality + answer metrics (needs PDF + QA)
+    
+    Extended with detailed response saving capabilities.
     """
     
     def __init__(
@@ -94,13 +96,66 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         
         logger.info("Retrieval benchmark initialized")
     
-    def validate_config(self) -> bool:
-        """Validate retrieval configuration."""
-        if not super().validate_config():
-            return False
-        return True
-    
     def run_all(
+        self,
+        questions: List[str],
+        ground_truth_answers: Optional[List[str]] = None,
+        relevant_doc_ids: Optional[List[Set[str]]] = None,
+        documents: Optional[List[str]] = None,
+        measure_retrieval_quality: Optional[bool] = None,
+        measure_context_quality: Optional[bool] = None,
+        measure_answer_quality: Optional[bool] = None,
+        compare_no_rag: Optional[bool] = None,
+        k_values: Optional[List[int]] = None,
+        save_detailed_responses: bool = False,
+        output_dir: Optional[str] = None
+    ) -> RetrievalResults:
+        """
+        Run all retrieval benchmarks.
+        
+        Args:
+            questions: List of questions
+            ground_truth_answers: Ground truth answers
+            relevant_doc_ids: Relevance judgments (for IR metrics)
+            documents: Documents to index
+            measure_retrieval_quality: Measure IR-style metrics
+            measure_context_quality: Measure context quality
+            measure_answer_quality: Measure answer quality
+            compare_no_rag: Compare with no-RAG baseline
+            k_values: K values for precision@k, recall@k
+            save_detailed_responses: Save individual Q&A responses
+            output_dir: Directory to save detailed responses
+            
+        Returns:
+            RetrievalResults object
+        """
+        if save_detailed_responses:
+            return self._run_with_response_capture(
+                questions=questions,
+                ground_truth_answers=ground_truth_answers,
+                relevant_doc_ids=relevant_doc_ids,
+                documents=documents,
+                measure_retrieval_quality=measure_retrieval_quality,
+                measure_context_quality=measure_context_quality,
+                measure_answer_quality=measure_answer_quality,
+                compare_no_rag=compare_no_rag,
+                k_values=k_values,
+                output_dir=output_dir
+            )
+        else:
+            return self._run_standard(
+                questions=questions,
+                ground_truth_answers=ground_truth_answers,
+                relevant_doc_ids=relevant_doc_ids,
+                documents=documents,
+                measure_retrieval_quality=measure_retrieval_quality,
+                measure_context_quality=measure_context_quality,
+                measure_answer_quality=measure_answer_quality,
+                compare_no_rag=compare_no_rag,
+                k_values=k_values
+            )
+    
+    def _run_standard(
         self,
         questions: List[str],
         ground_truth_answers: Optional[List[str]] = None,
@@ -112,23 +167,7 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         compare_no_rag: Optional[bool] = None,
         k_values: Optional[List[int]] = None
     ) -> RetrievalResults:
-        """
-        Run all retrieval benchmarks in appropriate mode.
-        
-        Args:
-            questions: List of questions
-            ground_truth_answers: Ground truth answers (for answer metrics)
-            relevant_doc_ids: Relevance judgments (for IR metrics)
-            documents: Documents to index (if not already indexed)
-            measure_retrieval_quality: Measure IR-style precision/recall
-            measure_context_quality: Measure context sufficiency/precision
-            measure_answer_quality: Measure answer correctness
-            compare_no_rag: Compare with no-RAG baseline
-            k_values: K values for precision@k, recall@k
-        """
-        
-        if not questions:
-            raise ValueError("No questions provided for evaluation")
+        """Standard evaluation without detailed response capture."""
         
         # Use config values if not provided
         measure_retrieval_quality = (measure_retrieval_quality 
@@ -193,7 +232,7 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                 retrieved_contexts.append([])
                 retrieved_ids.append([])
         
-        # ALWAYS measure retrieval consistency (doesn't need ground truth!)
+        # ALWAYS measure retrieval consistency
         try:
             logger.info("Measuring retrieval consistency metrics...")
             consistency_metrics = self._evaluate_retrieval_consistency(retrieved_contexts)
@@ -202,7 +241,7 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         except Exception as e:
             logger.error(f"Error evaluating retrieval consistency: {e}", exc_info=True)
         
-        # IR-style metrics (need relevance judgments)
+        # IR-style metrics
         if measure_retrieval_quality and has_relevance_judgments:
             try:
                 logger.info("Measuring IR-style retrieval quality...")
@@ -214,7 +253,7 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
             except Exception as e:
                 logger.error(f"Error evaluating retrieval quality: {e}", exc_info=True)
         
-        # QA-style context metrics (need ground truth answers)
+        # QA-style context metrics
         if measure_context_quality and has_ground_truth:
             try:
                 logger.info("Measuring context quality metrics...")
@@ -272,14 +311,241 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         
         return results
     
-    def _evaluate_retrieval_quality(
+    def _run_with_response_capture(
         self,
         questions: List[str],
-        retrieved_ids: List[List[str]],
-        relevant_doc_ids: List[Set[str]],
-        k_values: List[int]
-    ) -> Dict[str, float]:
-        """Evaluate retrieval quality using IR metrics (needs ground truth)."""
+        ground_truth_answers: Optional[List[str]] = None,
+        relevant_doc_ids: Optional[List[Set[str]]] = None,
+        documents: Optional[List[str]] = None,
+        measure_retrieval_quality: Optional[bool] = None,
+        measure_context_quality: Optional[bool] = None,
+        measure_answer_quality: Optional[bool] = None,
+        compare_no_rag: Optional[bool] = None,
+        k_values: Optional[List[int]] = None,
+        output_dir: Optional[str] = None
+    ) -> RetrievalResults:
+        """Evaluation with detailed response capture and saving."""
+        
+        logger.info(f"Running evaluation with detailed response capture...")
+        
+        # Use config values
+        measure_context_quality = (measure_context_quality 
+            if measure_context_quality is not None 
+            else self.config.get('measure_context_quality', True))
+        measure_answer_quality = (measure_answer_quality 
+            if measure_answer_quality is not None 
+            else self.config.get('measure_answer_quality', True))
+        compare_no_rag = (compare_no_rag 
+            if compare_no_rag is not None 
+            else self.config.get('compare_no_rag', True))
+        
+        # Index documents if provided
+        if documents:
+            logger.info(f"Indexing {len(documents)} documents...")
+            self.rag_pipeline.index_documents(documents, show_progress=True)
+        
+        # Storage for detailed responses
+        detailed_results = []
+        rag_answers = []
+        no_rag_answers = []
+        retrieved_contexts_list = []
+        
+        # Process each question
+        for i, question in enumerate(questions):
+            ground_truth = ground_truth_answers[i] if ground_truth_answers else ""
+            logger.info(f"\nQuestion {i+1}/{len(questions)}: {question[:80]}...")
+            
+            try:
+                # Retrieve contexts
+                contexts = self.rag_pipeline.retrieve(question)
+                retrieved_contexts_list.append(contexts)
+                
+                # Generate RAG answer
+                rag_answer = self.rag_pipeline.generate_answer(question, contexts)
+                rag_answers.append(rag_answer)
+                
+                # Generate no-RAG answer if needed
+                no_rag_answer = ""
+                if compare_no_rag:
+                    no_rag_answer = self.rag_pipeline.generator.generate_without_context(question)
+                no_rag_answers.append(no_rag_answer)
+                
+                # Compile context
+                context_texts = [ctx.get('text', ctx.get('content', '')) for ctx in contexts]
+                full_context = '\n\n'.join(context_texts)
+                
+                # Store detailed result
+                detailed_result = {
+                    'question_id': i + 1,
+                    'question': question,
+                    'ground_truth': ground_truth,
+                    'rag_answer': rag_answer,
+                    'no_rag_answer': no_rag_answer,
+                    'num_chunks_retrieved': len(contexts),
+                    'context_scores': [ctx.get('score', 0.0) for ctx in contexts],
+                    'avg_context_score': sum(ctx.get('score', 0.0) for ctx in contexts) / len(contexts) if contexts else 0.0,
+                    'full_context': full_context,
+                    'context_length_chars': len(full_context),
+                    'rag_answer_length_words': len(rag_answer.split()),
+                    'no_rag_answer_length_words': len(no_rag_answer.split()),
+                }
+                
+                detailed_results.append(detailed_result)
+                
+                logger.info(f"  RAG: {rag_answer[:100]}...")
+                if compare_no_rag:
+                    logger.info(f"  No-RAG: {no_rag_answer[:100]}...")
+                
+            except Exception as e:
+                logger.error(f"Error processing question {i+1}: {e}")
+                detailed_results.append({
+                    'question_id': i + 1,
+                    'question': question,
+                    'ground_truth': ground_truth,
+                    'rag_answer': '',
+                    'no_rag_answer': '',
+                    'error': str(e)
+                })
+                rag_answers.append('')
+                no_rag_answers.append('')
+                retrieved_contexts_list.append([])
+        
+        # Compute metrics
+        logger.info("Computing metrics...")
+        
+        full_contexts = [
+            ' '.join([ctx.get('text', ctx.get('content', '')) for ctx in ctxs])
+            for ctxs in retrieved_contexts_list
+        ]
+        
+        # RAG metrics
+        metrics = {}
+        if ground_truth_answers:
+            metrics = self.rag_metrics.evaluate_rag_system(
+                questions=questions,
+                predictions=rag_answers,
+                references=ground_truth_answers,
+                contexts=full_contexts,
+                predictions_no_rag=no_rag_answers if compare_no_rag else None
+            )
+        
+        # Context quality metrics
+        if measure_context_quality and ground_truth_answers:
+            context_metrics = self._evaluate_context_quality(
+                questions, retrieved_contexts_list, ground_truth_answers
+            )
+            metrics.update(context_metrics)
+        
+        # Retrieval consistency
+        consistency_metrics = self._evaluate_retrieval_consistency(retrieved_contexts_list)
+        metrics.update(consistency_metrics)
+        
+        # Create results object
+        results = RetrievalResults(
+            evaluation_mode='qa' if ground_truth_answers else 'retrieval_only',
+            num_questions=len(questions)
+        )
+        
+        for key, value in metrics.items():
+            if hasattr(results, key):
+                setattr(results, key, value)
+        
+        # Save detailed responses
+        if output_dir:
+            self._save_detailed_responses(detailed_results, metrics, output_dir)
+        
+        logger.info("Evaluation with response capture complete!")
+        return results
+    
+    def _save_detailed_responses(
+        self,
+        detailed_results: List[Dict[str, Any]],
+        metrics: Dict[str, Any],
+        output_dir: str
+    ):
+        """Save detailed responses in multiple formats."""
+        
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Saving detailed responses to {output_dir}...")
+        
+        # 1. JSON (complete data)
+        json_path = output_path / 'detailed_responses.json'
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(detailed_results, f, indent=2, ensure_ascii=False)
+        logger.info(f"  ✓ Saved: {json_path.name}")
+        
+        # 2. Human-readable text
+        text_path = output_path / 'responses_readable.txt'
+        with open(text_path, 'w', encoding='utf-8') as f:
+            f.write("="*80 + "\n")
+            f.write("DETAILED RESPONSES\n")
+            f.write("="*80 + "\n\n")
+            
+            for result in detailed_results:
+                f.write(f"\n{'='*80}\n")
+                f.write(f"QUESTION {result['question_id']}\n")
+                f.write(f"{'='*80}\n\n")
+                
+                f.write(f"Q: {result['question']}\n\n")
+                
+                if result.get('ground_truth'):
+                    f.write(f"GROUND TRUTH:\n{result['ground_truth']}\n\n")
+                
+                f.write(f"RAG ANSWER ({result.get('rag_answer_length_words', 0)} words):\n")
+                f.write(f"{result['rag_answer']}\n\n")
+                
+                if result.get('no_rag_answer'):
+                    f.write(f"NO-RAG ANSWER ({result.get('no_rag_answer_length_words', 0)} words):\n")
+                    f.write(f"{result['no_rag_answer']}\n\n")
+                
+                f.write(f"RETRIEVAL INFO:\n")
+                f.write(f"  Chunks: {result.get('num_chunks_retrieved', 0)}\n")
+                f.write(f"  Avg Score: {result.get('avg_context_score', 0.0):.4f}\n")
+                f.write(f"  Context Length: {result.get('context_length_chars', 0):,} chars\n\n")
+                
+                if 'context_scores' in result:
+                    f.write(f"  Scores: {', '.join([f'{s:.4f}' for s in result['context_scores']])}\n\n")
+                
+                f.write(f"CONTEXT (first 1000 chars):\n")
+                f.write(f"{'-'*80}\n")
+                f.write(f"{result.get('full_context', '')[:1000]}...\n")
+                f.write(f"{'-'*80}\n")
+        
+        logger.info(f"  ✓ Saved: {text_path.name}")
+        
+        # 3. CSV summary
+        csv_data = []
+        for result in detailed_results:
+            csv_data.append({
+                'id': result['question_id'],
+                'question': result['question'][:100] + '...' if len(result['question']) > 100 else result['question'],
+                'ground_truth': result.get('ground_truth', '')[:100] + '...' if result.get('ground_truth', '') and len(result.get('ground_truth', '')) > 100 else result.get('ground_truth', ''),
+                'rag_answer': result['rag_answer'][:100] + '...' if len(result['rag_answer']) > 100 else result['rag_answer'],
+                'no_rag_answer': result.get('no_rag_answer', '')[:100] + '...' if result.get('no_rag_answer', '') and len(result.get('no_rag_answer', '')) > 100 else result.get('no_rag_answer', ''),
+                'chunks': result.get('num_chunks_retrieved', 0),
+                'avg_score': result.get('avg_context_score', 0.0),
+                'rag_words': result.get('rag_answer_length_words', 0),
+                'no_rag_words': result.get('no_rag_answer_length_words', 0),
+            })
+        
+        df = pd.DataFrame(csv_data)
+        csv_path = output_path / 'responses_summary.csv'
+        df.to_csv(csv_path, index=False)
+        logger.info(f"  ✓ Saved: {csv_path.name}")
+        
+        # 4. Metrics
+        metrics_path = output_path / 'detailed_metrics.json'
+        with open(metrics_path, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        logger.info(f"  ✓ Saved: {metrics_path.name}")
+        
+        logger.info(f"All detailed responses saved to {output_dir}")
+    
+    # Keep existing helper methods unchanged...
+    def _evaluate_retrieval_quality(self, questions, retrieved_ids, relevant_doc_ids, k_values):
+        """Evaluate retrieval quality using IR metrics."""
         logger.info("Evaluating IR-style retrieval quality...")
         
         retrieval_results = self.retrieval_metrics.evaluate_retrieval(
@@ -297,18 +563,8 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         
         return retrieval_results
     
-    def _evaluate_retrieval_consistency(
-        self,
-        retrieved_contexts: List[List[Dict[str, Any]]]
-    ) -> Dict[str, float]:
-        """
-        Evaluate retrieval consistency WITHOUT needing ground truth.
-        
-        Measures:
-        - Average retrieval score
-        - Score consistency (std dev)
-        - Average chunks retrieved
-        """
+    def _evaluate_retrieval_consistency(self, retrieved_contexts):
+        """Evaluate retrieval consistency without ground truth."""
         scores = []
         chunk_counts = []
         
@@ -325,31 +581,14 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         if scores:
             metrics['avg_retrieval_score'] = float(np.mean(scores))
             metrics['retrieval_consistency'] = float(np.std(scores))
-            self._log_metric("avg_retrieval_score", f"{metrics['avg_retrieval_score']:.4f}")
-            self._log_metric("retrieval_consistency (std)", f"{metrics['retrieval_consistency']:.4f}")
         
         if chunk_counts:
             metrics['avg_chunks_retrieved'] = float(np.mean(chunk_counts))
-            self._log_metric("avg_chunks_retrieved", f"{metrics['avg_chunks_retrieved']:.2f}")
         
         return metrics
     
-    def _evaluate_context_quality(
-        self,
-        questions: List[str],
-        retrieved_contexts: List[List[Dict[str, Any]]],
-        ground_truth_answers: List[str]
-    ) -> Dict[str, float]:
-        """
-        NEW: Evaluate context quality for QA (needs ground truth answers).
-        
-        Measures:
-        - Context sufficiency: Does context contain the answer?
-        - Context precision: How much context is relevant?
-        - Context coverage: % of answer tokens present in context
-        """
-        logger.info("Evaluating context quality for QA...")
-        
+    def _evaluate_context_quality(self, questions, retrieved_contexts, ground_truth_answers):
+        """Evaluate context quality for QA."""
         sufficiency_scores = []
         precision_scores = []
         coverage_scores = []
@@ -363,11 +602,7 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                 context_lengths.append(0)
                 continue
             
-            # Concatenate all retrieved chunks
-            full_context = ' '.join([
-                ctx.get('text', ctx.get('content', ''))
-                for ctx in contexts
-            ])
+            full_context = ' '.join([ctx.get('text', ctx.get('content', '')) for ctx in contexts])
             
             if not full_context.strip():
                 sufficiency_scores.append(0.0)
@@ -376,49 +611,36 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                 context_lengths.append(0)
                 continue
             
-            # Context sufficiency: Does context contain answer spans?
+            # Sufficiency
             sufficiency = self._calculate_context_sufficiency(full_context, answer)
             sufficiency_scores.append(sufficiency)
             
-            # Context precision: Relevance to question
+            # Precision
             precision = self.retrieval_metrics.context_relevance(full_context, question)
             precision_scores.append(precision)
             
-            # Context coverage: % of answer tokens in context
+            # Coverage
             coverage = self._calculate_answer_coverage(full_context, answer)
             coverage_scores.append(coverage)
             
-            # Context length
+            # Length
             context_lengths.append(len(full_context.split()))
         
-        metrics = {
+        return {
             'context_sufficiency': float(np.mean(sufficiency_scores)) if sufficiency_scores else 0.0,
             'context_precision': float(np.mean(precision_scores)) if precision_scores else 0.0,
             'context_coverage': float(np.mean(coverage_scores)) if coverage_scores else 0.0,
             'avg_context_length': float(np.mean(context_lengths)) if context_lengths else 0.0
         }
-        
-        for metric, value in metrics.items():
-            self._log_metric(metric, f"{value:.4f}")
-        
-        return metrics
     
     def _calculate_context_sufficiency(self, context: str, answer: str) -> float:
-        """
-        Calculate if context contains the answer (fuzzy match).
-        
-        Checks for:
-        1. Exact substring match
-        2. Token-level overlap (with configurable threshold)
-        """
+        """Calculate if context contains the answer."""
         context_lower = context.lower()
         answer_lower = answer.lower()
         
-        # Exact match
         if answer_lower in context_lower:
             return 1.0
         
-        # Token overlap (configurable threshold)
         threshold = self.config.get('sufficiency_token_threshold', 0.8)
         answer_tokens = set(answer_lower.split())
         context_tokens = set(context_lower.split())
@@ -432,7 +654,7 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         return 1.0 if overlap_ratio >= threshold else overlap_ratio
     
     def _calculate_answer_coverage(self, context: str, answer: str) -> float:
-        """Calculate what fraction of answer tokens appear in context."""
+        """Calculate fraction of answer tokens in context."""
         context_tokens = set(context.lower().split())
         answer_tokens = set(answer.lower().split())
         
@@ -443,24 +665,18 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         return covered / len(answer_tokens)
     
     def _generate_no_rag_answers(self, questions: List[str]) -> List[str]:
-        """Generate answers without RAG for comparison."""
+        """Generate answers without RAG."""
         answers = []
-        
         for question in questions:
             try:
                 answer = self.rag_pipeline.generator.generate_without_context(question)
                 answers.append(answer)
             except Exception as e:
-                logger.error(f"Error generating no-RAG answer for '{question}': {e}")
+                logger.error(f"Error generating no-RAG answer: {e}")
                 answers.append("")
-        
         return answers
     
-    def evaluate_from_file(
-        self,
-        dataset_path: str,
-        **kwargs
-    ) -> RetrievalResults:
+    def evaluate_from_file(self, dataset_path: str, **kwargs) -> RetrievalResults:
         """Run evaluation from a dataset file."""
         logger.info(f"Loading dataset from {dataset_path}")
         
@@ -476,13 +692,11 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         
         # Extract questions and answers
         if isinstance(dataset, list):
-            # Format: [{"question": ..., "answer": ...}, ...]
             questions = [item['question'] for item in dataset]
             ground_truth_answers = [item['answer'] for item in dataset if 'answer' in item]
             relevant_doc_ids = None
             documents = None
         elif isinstance(dataset, dict):
-            # Format: {"questions": [...], "ground_truth_answers": [...], ...}
             questions = dataset.get('questions', [])
             ground_truth_answers = dataset.get('ground_truth_answers', None)
             relevant_doc_ids = dataset.get('relevant_doc_ids', None)
