@@ -5,10 +5,10 @@ import logging
 import torch
 from pathlib import Path
 
-from utils.config_loader import ConfigLoader
+from config_loader import ConfigLoader
 from models.model_interface import create_model_interface
 from rag.pipeline import RAGPipeline
-from evaluation.runner import EvaluationRunner  # Fixed: was 'orchestrator'
+from evaluation.runner import EvaluationRunner 
 
 # Setup logging
 logging.basicConfig(

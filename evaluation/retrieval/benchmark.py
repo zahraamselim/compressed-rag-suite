@@ -1,5 +1,6 @@
 """Retrieval benchmark orchestrator with detailed response saving."""
 
+import time
 import logging
 import json
 import pandas as pd
@@ -61,7 +62,18 @@ class RetrievalResults(BenchmarkResult):
     no_rag_exact_match: Optional[float] = None
     f1_improvement: Optional[float] = None
     em_improvement: Optional[float] = None
-    
+
+    # Timing metrics
+    avg_retrieval_time_ms: Optional[float] = None
+    std_retrieval_time_ms: Optional[float] = None
+    avg_rag_generation_time_ms: Optional[float] = None
+    std_rag_generation_time_ms: Optional[float] = None
+    avg_no_rag_generation_time_ms: Optional[float] = None
+    std_no_rag_generation_time_ms: Optional[float] = None
+    rag_tokens_per_sec: Optional[float] = None
+    no_rag_tokens_per_sec: Optional[float] = None
+    generation_speedup: Optional[float] = None
+
     # Metadata
     evaluation_mode: Optional[str] = None
     num_questions: Optional[int] = None
@@ -167,7 +179,7 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         compare_no_rag: Optional[bool] = None,
         k_values: Optional[List[int]] = None
     ) -> RetrievalResults:
-        """Standard evaluation without detailed response capture."""
+        """Standard evaluation with timing measurements."""
         
         # Use config values if not provided
         measure_retrieval_quality = (measure_retrieval_quality 
@@ -215,22 +227,79 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
             num_questions=len(questions)
         )
         
-        # Retrieve contexts for all questions
-        logger.info("Retrieving contexts for all questions...")
+        # Storage for timing and answers
         retrieved_contexts = []
         retrieved_ids = []
+        rag_answers = []
+        no_rag_answers = []
+        retrieval_times = []
+        rag_generation_times = []
+        no_rag_generation_times = []
         
+        # Retrieve contexts and generate answers WITH timing
+        logger.info("Retrieving contexts and generating answers...")
         for question in questions:
             try:
+                # Measure retrieval time
+                retrieval_start = time.perf_counter()
                 contexts = self.rag_pipeline.retrieve(question)
+                retrieval_time = (time.perf_counter() - retrieval_start) * 1000  # ms
+                retrieval_times.append(retrieval_time)
+                
                 retrieved_contexts.append(contexts)
                 chunk_ids = [ctx.get('chunk_id', ctx.get('id', f'chunk_{i}')) 
                             for i, ctx in enumerate(contexts)]
                 retrieved_ids.append(chunk_ids)
+                
+                # Measure RAG generation time
+                rag_gen_start = time.perf_counter()
+                answer = self.rag_pipeline.generate_answer(question, contexts)
+                rag_gen_time = (time.perf_counter() - rag_gen_start) * 1000  # ms
+                rag_generation_times.append(rag_gen_time)
+                rag_answers.append(answer)
+                
+                # Measure no-RAG generation time if needed
+                if compare_no_rag and has_ground_truth:
+                    no_rag_start = time.perf_counter()
+                    no_rag_answer = self.rag_pipeline.generator.generate_without_context(question)
+                    no_rag_time = (time.perf_counter() - no_rag_start) * 1000  # ms
+                    no_rag_generation_times.append(no_rag_time)
+                    no_rag_answers.append(no_rag_answer)
+                
             except Exception as e:
-                logger.error(f"Error retrieving for question '{question}': {e}")
+                logger.error(f"Error processing question '{question}': {e}")
                 retrieved_contexts.append([])
                 retrieved_ids.append([])
+                rag_answers.append("")
+                retrieval_times.append(0.0)
+                rag_generation_times.append(0.0)
+                if compare_no_rag and has_ground_truth:
+                    no_rag_answers.append("")
+                    no_rag_generation_times.append(0.0)
+        
+        # Add timing metrics to results
+        if retrieval_times:
+            results.avg_retrieval_time_ms = float(np.mean(retrieval_times))
+            results.std_retrieval_time_ms = float(np.std(retrieval_times))
+        
+        if rag_generation_times:
+            results.avg_rag_generation_time_ms = float(np.mean(rag_generation_times))
+            results.std_rag_generation_time_ms = float(np.std(rag_generation_times))
+            
+            # Calculate tokens/sec (approximate using words)
+            avg_answer_words = np.mean([len(ans.split()) for ans in rag_answers if ans])
+            results.rag_tokens_per_sec = float(avg_answer_words / (np.mean(rag_generation_times) / 1000)) if rag_generation_times else 0.0
+        
+        if no_rag_generation_times:
+            results.avg_no_rag_generation_time_ms = float(np.mean(no_rag_generation_times))
+            results.std_no_rag_generation_time_ms = float(np.std(no_rag_generation_times))
+            
+            # Calculate no-RAG tokens/sec
+            avg_no_rag_words = np.mean([len(ans.split()) for ans in no_rag_answers if ans])
+            results.no_rag_tokens_per_sec = float(avg_no_rag_words / (np.mean(no_rag_generation_times) / 1000)) if no_rag_generation_times else 0.0
+            
+            # Generation speedup
+            results.generation_speedup = float(np.mean(no_rag_generation_times) / np.mean(rag_generation_times)) if rag_generation_times else 1.0
         
         # ALWAYS measure retrieval consistency
         try:
@@ -265,17 +334,6 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
             except Exception as e:
                 logger.error(f"Error evaluating context quality: {e}", exc_info=True)
         
-        # Generate answers with RAG
-        logger.info("Generating answers with RAG...")
-        rag_answers = []
-        for question, contexts in zip(questions, retrieved_contexts):
-            try:
-                answer = self.rag_pipeline.generate_answer(question, contexts)
-                rag_answers.append(answer)
-            except Exception as e:
-                logger.error(f"Error generating answer for question '{question}': {e}")
-                rag_answers.append("")
-        
         # Measure answer quality
         if measure_answer_quality and has_ground_truth:
             try:
@@ -284,19 +342,13 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                     for ctxs in retrieved_contexts
                 ]
                 
-                # Generate no-RAG baseline if requested
-                no_rag_answers = None
-                if compare_no_rag:
-                    logger.info("Generating no-RAG baseline answers...")
-                    no_rag_answers = self._generate_no_rag_answers(questions)
-                
                 # Evaluate RAG system
                 rag_results = self.rag_metrics.evaluate_rag_system(
                     questions=questions,
                     predictions=rag_answers,
                     references=ground_truth_answers,
                     contexts=full_contexts,
-                    predictions_no_rag=no_rag_answers
+                    predictions_no_rag=no_rag_answers if no_rag_answers else None
                 )
                 
                 for key, value in rag_results.items():
@@ -329,6 +381,9 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         logger.info(f"Running evaluation with detailed response capture...")
         
         # Use config values
+        measure_retrieval_quality = (measure_retrieval_quality 
+            if measure_retrieval_quality is not None 
+            else self.config.get('measure_retrieval_quality', True))
         measure_context_quality = (measure_context_quality 
             if measure_context_quality is not None 
             else self.config.get('measure_context_quality', True))
@@ -338,17 +393,41 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         compare_no_rag = (compare_no_rag 
             if compare_no_rag is not None 
             else self.config.get('compare_no_rag', True))
+        k_values = k_values or self.config.get('k_values', [1, 3, 5, 10])
+        
+        # Determine evaluation mode
+        has_relevance_judgments = relevant_doc_ids is not None
+        has_ground_truth = ground_truth_answers is not None
+        
+        if has_relevance_judgments:
+            mode = 'ir'
+            logger.info("Mode: IR-style evaluation (using relevance judgments)")
+        elif has_ground_truth:
+            mode = 'qa'
+            logger.info("Mode: QA-style evaluation (using ground truth answers)")
+        else:
+            mode = 'retrieval_only'
+            logger.info("Mode: Retrieval consistency only (no ground truth)")
         
         # Index documents if provided
         if documents:
             logger.info(f"Indexing {len(documents)} documents...")
             self.rag_pipeline.index_documents(documents, show_progress=True)
         
+        # Check if documents are indexed
+        stats = self.rag_pipeline.get_stats()
+        if stats['vector_store'].get('count', 0) == 0:
+            raise ValueError("No documents indexed! Provide documents or index them first.")
+        
         # Storage for detailed responses
         detailed_results = []
         rag_answers = []
         no_rag_answers = []
         retrieved_contexts_list = []
+        retrieved_ids = []
+        rag_generation_times = []
+        no_rag_generation_times = []
+        retrieval_times = []
         
         # Process each question
         for i, question in enumerate(questions):
@@ -357,17 +436,31 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
             
             try:
                 # Retrieve contexts
+                retrieval_start = time.perf_counter()
                 contexts = self.rag_pipeline.retrieve(question)
+                retrieval_time = (time.perf_counter() - retrieval_start) * 1000  # ms
+                retrieval_times.append(retrieval_time)
                 retrieved_contexts_list.append(contexts)
                 
+                chunk_ids = [ctx.get('chunk_id', ctx.get('id', f'chunk_{i}')) 
+                            for i, ctx in enumerate(contexts)]
+                retrieved_ids.append(chunk_ids)
+                
                 # Generate RAG answer
+                rag_gen_start = time.perf_counter()
                 rag_answer = self.rag_pipeline.generate_answer(question, contexts)
+                rag_gen_time = (time.perf_counter() - rag_gen_start) * 1000  # ms
+                rag_generation_times.append(rag_gen_time)
                 rag_answers.append(rag_answer)
                 
                 # Generate no-RAG answer if needed
                 no_rag_answer = ""
+                no_rag_gen_time = 0.0
                 if compare_no_rag:
+                    no_rag_gen_start = time.perf_counter()
                     no_rag_answer = self.rag_pipeline.generator.generate_without_context(question)
+                    no_rag_gen_time = (time.perf_counter() - no_rag_gen_start) * 1000  # ms
+                    no_rag_generation_times.append(no_rag_gen_time)
                 no_rag_answers.append(no_rag_answer)
                 
                 # Compile context
@@ -388,13 +481,21 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                     'context_length_chars': len(full_context),
                     'rag_answer_length_words': len(rag_answer.split()),
                     'no_rag_answer_length_words': len(no_rag_answer.split()),
+                    'retrieval_time_ms': retrieval_time,
+                    'rag_generation_time_ms': rag_gen_time,
+                    'no_rag_generation_time_ms': no_rag_gen_time,
+                    'total_rag_time_ms': retrieval_time + rag_gen_time,
                 }
                 
                 detailed_results.append(detailed_result)
                 
+                logger.info(f"  Retrieval: {retrieval_time:.1f}ms")
                 logger.info(f"  RAG: {rag_answer[:100]}...")
+                logger.info(f"  RAG time: {rag_gen_time:.1f}ms")
                 if compare_no_rag:
                     logger.info(f"  No-RAG: {no_rag_answer[:100]}...")
+                    logger.info(f"  No-RAG time: {no_rag_gen_time:.1f}ms")
+                    logger.info(f"  Speedup: {no_rag_gen_time/rag_gen_time:.2f}x" if rag_gen_time > 0 else "  Speedup: N/A")
                 
             except Exception as e:
                 logger.error(f"Error processing question {i+1}: {e}")
@@ -404,11 +505,18 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                     'ground_truth': ground_truth,
                     'rag_answer': '',
                     'no_rag_answer': '',
-                    'error': str(e)
+                    'error': str(e),
+                    'retrieval_time_ms': 0.0,
+                    'rag_generation_time_ms': 0.0,
+                    'no_rag_generation_time_ms': 0.0
                 })
                 rag_answers.append('')
                 no_rag_answers.append('')
                 retrieved_contexts_list.append([])
+                retrieved_ids.append([])
+                retrieval_times.append(0.0)
+                rag_generation_times.append(0.0)
+                no_rag_generation_times.append(0.0)
         
         # Compute metrics
         logger.info("Computing metrics...")
@@ -429,6 +537,18 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                 predictions_no_rag=no_rag_answers if compare_no_rag else None
             )
         
+        # IR-style metrics
+        if measure_retrieval_quality and has_relevance_judgments:
+            try:
+                logger.info("Measuring IR-style retrieval quality...")
+                retrieval_results = self._evaluate_retrieval_quality(
+                    questions, retrieved_ids, relevant_doc_ids, k_values
+                )
+                for key, value in retrieval_results.items():
+                    metrics[key.replace('@', '_at_').replace('-', '_')] = value
+            except Exception as e:
+                logger.error(f"Error evaluating retrieval quality: {e}", exc_info=True)
+        
         # Context quality metrics
         if measure_context_quality and ground_truth_answers:
             context_metrics = self._evaluate_context_quality(
@@ -439,10 +559,38 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         # Retrieval consistency
         consistency_metrics = self._evaluate_retrieval_consistency(retrieved_contexts_list)
         metrics.update(consistency_metrics)
+
+        # Timing metrics
+        timing_metrics = {}
+    
+        if retrieval_times:
+            timing_metrics['avg_retrieval_time_ms'] = float(np.mean(retrieval_times))
+            timing_metrics['std_retrieval_time_ms'] = float(np.std(retrieval_times))
         
+        if rag_generation_times:
+            timing_metrics['avg_rag_generation_time_ms'] = float(np.mean(rag_generation_times))
+            timing_metrics['std_rag_generation_time_ms'] = float(np.std(rag_generation_times))
+            
+            # Tokens per second for RAG
+            avg_rag_words = np.mean([r['rag_answer_length_words'] for r in detailed_results if 'rag_answer_length_words' in r and r['rag_answer_length_words'] > 0])
+            timing_metrics['rag_tokens_per_sec'] = float(avg_rag_words / (np.mean(rag_generation_times) / 1000)) if rag_generation_times and avg_rag_words > 0 else 0.0
+        
+        if no_rag_generation_times:
+            timing_metrics['avg_no_rag_generation_time_ms'] = float(np.mean(no_rag_generation_times))
+            timing_metrics['std_no_rag_generation_time_ms'] = float(np.std(no_rag_generation_times))
+            
+            # Tokens per second for no-RAG
+            avg_no_rag_words = np.mean([r['no_rag_answer_length_words'] for r in detailed_results if 'no_rag_answer_length_words' in r and r['no_rag_answer_length_words'] > 0])
+            timing_metrics['no_rag_tokens_per_sec'] = float(avg_no_rag_words / (np.mean(no_rag_generation_times) / 1000)) if no_rag_generation_times and avg_no_rag_words > 0 else 0.0
+            
+            # Generation speedup (RAG vs no-RAG)
+            timing_metrics['generation_speedup'] = float(np.mean(no_rag_generation_times) / np.mean(rag_generation_times)) if rag_generation_times else 1.0
+        
+        metrics.update(timing_metrics)
+
         # Create results object
         results = RetrievalResults(
-            evaluation_mode='qa' if ground_truth_answers else 'retrieval_only',
+            evaluation_mode=mode,
             num_questions=len(questions)
         )
         
@@ -508,6 +656,15 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                 if 'context_scores' in result:
                     f.write(f"  Scores: {', '.join([f'{s:.4f}' for s in result['context_scores']])}\n\n")
                 
+                f.write(f"TIMING:\n")
+                f.write(f"  Retrieval: {result.get('retrieval_time_ms', 0.0):.1f}ms\n")
+                f.write(f"  RAG Generation: {result.get('rag_generation_time_ms', 0.0):.1f}ms\n")
+                if result.get('no_rag_generation_time_ms', 0.0) > 0:
+                    f.write(f"  No-RAG Generation: {result.get('no_rag_generation_time_ms', 0.0):.1f}ms\n")
+                    speedup = result.get('no_rag_generation_time_ms', 0.0) / result.get('rag_generation_time_ms', 1.0) if result.get('rag_generation_time_ms', 0.0) > 0 else 0.0
+                    f.write(f"  Speedup: {speedup:.2f}x\n")
+                f.write(f"  Total RAG Time: {result.get('total_rag_time_ms', 0.0):.1f}ms\n\n")
+                
                 f.write(f"CONTEXT (first 1000 chars):\n")
                 f.write(f"{'-'*80}\n")
                 f.write(f"{result.get('full_context', '')[:1000]}...\n")
@@ -528,6 +685,9 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
                 'avg_score': result.get('avg_context_score', 0.0),
                 'rag_words': result.get('rag_answer_length_words', 0),
                 'no_rag_words': result.get('no_rag_answer_length_words', 0),
+                'retrieval_ms': result.get('retrieval_time_ms', 0.0),
+                'rag_gen_ms': result.get('rag_generation_time_ms', 0.0),
+                'no_rag_gen_ms': result.get('no_rag_generation_time_ms', 0.0),
             })
         
         df = pd.DataFrame(csv_data)
@@ -543,7 +703,6 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         
         logger.info(f"All detailed responses saved to {output_dir}")
     
-    # Keep existing helper methods unchanged...
     def _evaluate_retrieval_quality(self, questions, retrieved_ids, relevant_doc_ids, k_values):
         """Evaluate retrieval quality using IR metrics."""
         logger.info("Evaluating IR-style retrieval quality...")
@@ -663,18 +822,6 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         
         covered = len(answer_tokens & context_tokens)
         return covered / len(answer_tokens)
-    
-    def _generate_no_rag_answers(self, questions: List[str]) -> List[str]:
-        """Generate answers without RAG."""
-        answers = []
-        for question in questions:
-            try:
-                answer = self.rag_pipeline.generator.generate_without_context(question)
-                answers.append(answer)
-            except Exception as e:
-                logger.error(f"Error generating no-RAG answer: {e}")
-                answers.append("")
-        return answers
     
     def evaluate_from_file(self, dataset_path: str, **kwargs) -> RetrievalResults:
         """Run evaluation from a dataset file."""
