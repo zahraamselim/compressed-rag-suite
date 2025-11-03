@@ -1,4 +1,4 @@
-"""Wrapper for lm-evaluation-harness with comprehensive task support."""
+"""Wrapper for lm-evaluation-harness with comprehensive task support - FIXED for HumanEval."""
 
 import logging
 from typing import List, Dict, Optional, Union, Any
@@ -343,12 +343,26 @@ def run_lm_eval_harness(
                 
                 # Run evaluation
                 if use_new_api:
+                    # FIXED: Added confirm_run_unsafe_code=True for HumanEval
                     results = simple_evaluate(
                         model=lm_eval_model,
                         tasks=[task_name],
                         num_fewshot=task_fewshot,
                         limit=task_limit,
-                        batch_size=task_batch
+                        batch_size=task_batch,
+                        log_samples=False,
+                        gen_kwargs=None,
+                        task_manager=None,
+                        verbosity="INFO",
+                        predict_only=False,
+                        random_seed=0,
+                        numpy_random_seed=1234,
+                        torch_random_seed=1234,
+                        fewshot_random_seed=1234,
+                        write_out=False,
+                        apply_chat_template=False,
+                        check_integrity=False,
+                        confirm_run_unsafe_code=True  # <-- FIX: Allow code execution for HumanEval
                     )
                 else:
                     # Old API
