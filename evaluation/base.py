@@ -1,7 +1,7 @@
-"""Base classes for evaluation benchmarks."""
+"""Base classes for evaluation benchmarks - Enhanced with statistical analysis."""
 
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar, Optional, Any, List, Dict
+from typing import Generic, TypeVar, Optional, Any, List, Dict, Tuple
 from dataclasses import dataclass, asdict
 import logging
 import json
@@ -10,13 +10,21 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Check for scipy
+try:
+    from scipy import stats as scipy_stats
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    logger.debug("scipy not available for advanced statistics")
+
 # Type variable for benchmark results
 T = TypeVar('T', bound='BenchmarkResult')
 
 
 @dataclass
 class BenchmarkResult:
-    """Base class for benchmark results."""
+    """Base class for benchmark results with statistical support."""
     
     def to_dict(self) -> dict:
         """Convert result to dictionary."""
@@ -124,11 +132,12 @@ class BenchmarkResult:
         """
         # Metrics where higher is better
         higher_better = ['accuracy', 'precision', 'recall', 'f1', 'throughput', 
-                        'mfu', 'score', 'map', 'mrr', 'tokens_per_sec']
+                        'mfu', 'score', 'map', 'mrr', 'tokens_per_sec', 'speedup',
+                        'rouge', 'bleu', 'bertscore', 'exact_match', 'faithfulness']
         
         # Metrics where lower is better
         lower_better = ['latency', 'perplexity', 'loss', 'memory', 'energy', 
-                       'ms_per_token', 'time', 'error']
+                       'ms_per_token', 'time', 'error', 'std']
         
         metric_lower = metric.lower()
         
@@ -144,17 +153,21 @@ class BenchmarkResult:
         return True
     
     @staticmethod
-    def aggregate_from_runs(runs: List['BenchmarkResult'], 
-                           metrics: Optional[List[str]] = None) -> Dict[str, Dict[str, float]]:
+    def aggregate_from_runs(
+        runs: List['BenchmarkResult'], 
+        metrics: Optional[List[str]] = None,
+        confidence: float = 0.95
+    ) -> Dict[str, Dict[str, float]]:
         """
-        Aggregate results from multiple runs with statistics.
+        Aggregate results from multiple runs with statistics and confidence intervals.
         
         Args:
             runs: List of BenchmarkResult instances
             metrics: Specific metrics to aggregate (None = all numeric)
+            confidence: Confidence level for intervals (default: 0.95)
             
         Returns:
-            Dict with mean, std, min, max, median for each metric
+            Dict with mean, std, std_err, confidence intervals, min, max, median for each metric
         """
         if not runs:
             raise ValueError("No runs provided")
@@ -173,16 +186,130 @@ class BenchmarkResult:
         aggregated = {}
         for metric, values in all_metrics.items():
             values_array = np.array(values)
-            aggregated[metric] = {
-                'mean': float(np.mean(values_array)),
-                'std': float(np.std(values_array)),
+            n = len(values)
+            mean = np.mean(values_array)
+            std = np.std(values_array, ddof=1)  # Sample std
+            std_err = std / np.sqrt(n)
+            
+            stats_dict = {
+                'mean': float(mean),
+                'std': float(std),
+                'std_err': float(std_err),
                 'min': float(np.min(values_array)),
                 'max': float(np.max(values_array)),
                 'median': float(np.median(values_array)),
-                'n_runs': len(values)
+                'n_runs': n
             }
+            
+            # Add confidence intervals if scipy available
+            if SCIPY_AVAILABLE and n > 1:
+                t_val = scipy_stats.t.ppf((1 + confidence) / 2, n - 1)
+                ci_margin = t_val * std_err
+                stats_dict['ci_lower'] = float(mean - ci_margin)
+                stats_dict['ci_upper'] = float(mean + ci_margin)
+                stats_dict['confidence_level'] = confidence
+            
+            aggregated[metric] = stats_dict
         
         return aggregated
+    
+    @staticmethod
+    def statistical_test(
+        baseline_runs: List['BenchmarkResult'],
+        comparison_runs: List['BenchmarkResult'],
+        metrics: Optional[List[str]] = None,
+        alpha: float = 0.05,
+        test_type: str = 'ttest'
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Test if differences between two sets of runs are statistically significant.
+        
+        Args:
+            baseline_runs: List of baseline BenchmarkResult instances
+            comparison_runs: List of comparison BenchmarkResult instances
+            metrics: Specific metrics to test (None = all numeric)
+            alpha: Significance level (default: 0.05)
+            test_type: Type of test ('ttest', 'mannwhitney')
+            
+        Returns:
+            Dict with test results for each metric
+        """
+        if not SCIPY_AVAILABLE:
+            logger.warning("scipy required for statistical tests")
+            return {}
+        
+        if not baseline_runs or not comparison_runs:
+            raise ValueError("Need at least one run in each group")
+        
+        # Collect metrics
+        baseline_metrics = {}
+        comparison_metrics = {}
+        
+        for run in baseline_runs:
+            for key, value in run.to_dict().items():
+                if isinstance(value, (int, float)):
+                    if metrics is None or key in metrics:
+                        if key not in baseline_metrics:
+                            baseline_metrics[key] = []
+                        baseline_metrics[key].append(float(value))
+        
+        for run in comparison_runs:
+            for key, value in run.to_dict().items():
+                if isinstance(value, (int, float)):
+                    if metrics is None or key in metrics:
+                        if key not in comparison_metrics:
+                            comparison_metrics[key] = []
+                        comparison_metrics[key].append(float(value))
+        
+        # Perform tests
+        results = {}
+        for metric in baseline_metrics.keys():
+            if metric not in comparison_metrics:
+                continue
+            
+            baseline_vals = np.array(baseline_metrics[metric])
+            comparison_vals = np.array(comparison_metrics[metric])
+            
+            if len(baseline_vals) < 2 or len(comparison_vals) < 2:
+                logger.warning(f"Need at least 2 runs per group for {metric}")
+                continue
+            
+            if test_type == 'ttest':
+                # Independent samples t-test
+                statistic, p_value = scipy_stats.ttest_ind(comparison_vals, baseline_vals)
+                test_name = "Independent t-test"
+            elif test_type == 'mannwhitney':
+                # Mann-Whitney U test (non-parametric)
+                statistic, p_value = scipy_stats.mannwhitneyu(
+                    comparison_vals, baseline_vals, alternative='two-sided'
+                )
+                test_name = "Mann-Whitney U test"
+            else:
+                logger.warning(f"Unknown test type: {test_type}")
+                continue
+            
+            # Effect size (Cohen's d)
+            pooled_std = np.sqrt(
+                ((len(baseline_vals) - 1) * np.var(baseline_vals, ddof=1) +
+                 (len(comparison_vals) - 1) * np.var(comparison_vals, ddof=1)) /
+                (len(baseline_vals) + len(comparison_vals) - 2)
+            )
+            cohens_d = (np.mean(comparison_vals) - np.mean(baseline_vals)) / pooled_std if pooled_std > 0 else 0.0
+            
+            results[metric] = {
+                'test': test_name,
+                'statistic': float(statistic),
+                'p_value': float(p_value),
+                'significant': p_value < alpha,
+                'alpha': alpha,
+                'cohens_d': float(cohens_d),
+                'baseline_mean': float(np.mean(baseline_vals)),
+                'comparison_mean': float(np.mean(comparison_vals)),
+                'baseline_n': len(baseline_vals),
+                'comparison_n': len(comparison_vals)
+            }
+        
+        return results
     
     def validate(self) -> bool:
         """
@@ -279,6 +406,44 @@ class ModelBenchmark(ABC, Generic[T]):
         
         return result.validate()
     
+    def run_multiple(self, n_runs: int = 5, **kwargs) -> Tuple[T, Dict[str, Dict[str, float]]]:
+        """
+        Run benchmark multiple times and aggregate results.
+        
+        Args:
+            n_runs: Number of runs to perform
+            **kwargs: Arguments to pass to run_all()
+            
+        Returns:
+            Tuple of (mean_result, aggregated_stats)
+        """
+        logger.info(f"Running benchmark {n_runs} times...")
+        
+        runs = []
+        for i in range(n_runs):
+            logger.info(f"Run {i+1}/{n_runs}")
+            result = self.run_all(**kwargs)
+            if self.validate_result(result):
+                runs.append(result)
+            else:
+                logger.warning(f"Run {i+1} produced invalid results, skipping")
+        
+        if not runs:
+            raise RuntimeError("All runs failed validation")
+        
+        # Aggregate
+        aggregated = BenchmarkResult.aggregate_from_runs(runs)
+        
+        # Create mean result
+        mean_result = runs[0]  # Copy structure from first run
+        for key, stats in aggregated.items():
+            if hasattr(mean_result, key):
+                setattr(mean_result, key, stats['mean'])
+        
+        logger.info(f"Completed {len(runs)}/{n_runs} successful runs")
+        
+        return mean_result, aggregated
+    
     def _log_metric(self, name: str, value: Any):
         """Log a metric if verbose mode is enabled."""
         if self.verbose:
@@ -286,3 +451,11 @@ class ModelBenchmark(ABC, Generic[T]):
                 logger.info(f"{name}: {value:.4f}")
             else:
                 logger.info(f"{name}: {value}")
+
+
+# Export key components
+__all__ = [
+    'BenchmarkResult',
+    'ModelBenchmark',
+    'SCIPY_AVAILABLE'
+]

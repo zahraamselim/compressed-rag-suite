@@ -1,4 +1,4 @@
-"""Throughput measurement utilities."""
+"""Throughput measurement utilities - Fixed batch calculation."""
 
 import time
 import logging
@@ -194,20 +194,23 @@ def measure_batch_throughput(
             
             end_time = time.perf_counter()
             
-            total_tokens = sum(
-                outputs[i].shape[0] - inputs['input_ids'][i].shape[0]
-                for i in range(outputs.shape[0])
-            )
+            # FIXED: Correct total token calculation
+            total_tokens = 0
+            for i in range(outputs.shape[0]):
+                num_new_tokens = outputs[i].shape[0] - inputs['input_ids'][i].shape[0]
+                total_tokens += num_new_tokens
+            
             run_time = end_time - start_time
             throughput = total_tokens / run_time if run_time > 0 else 0.0
             
             results[batch_size] = {
                 'throughput': throughput,
                 'tokens_per_sequence': total_tokens / batch_size,
-                'time_seconds': run_time
+                'time_seconds': run_time,
+                'total_tokens': total_tokens
             }
             
-            logger.info(f"Batch size {batch_size}: {throughput:.2f} tok/s")
+            logger.info(f"Batch size {batch_size}: {throughput:.2f} tok/s ({total_tokens} tokens in {run_time:.2f}s)")
             
         except RuntimeError as e:
             if "out of memory" in str(e).lower():

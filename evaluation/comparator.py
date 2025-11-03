@@ -1,4 +1,4 @@
-"""Statistical comparison tool for evaluation results."""
+"""Statistical comparison tool for evaluation results - Enhanced."""
 
 import json
 import logging
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 # Check for scipy
 try:
-    from scipy import stats
+    from scipy import stats as scipy_stats
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
@@ -143,6 +143,169 @@ class ResultsComparator:
         
         return comparisons
     
+    def statistical_significance_test(
+        self,
+        baseline_idx: int,
+        comparison_idx: int,
+        metrics: List[str],
+        alpha: float = 0.05,
+        test_type: str = 'ttest'
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Test if differences are statistically significant.
+        Requires results to contain std deviation information from multiple runs.
+        
+        Args:
+            baseline_idx: Index of baseline result
+            comparison_idx: Index of comparison result  
+            metrics: List of metrics to test
+            alpha: Significance level (default: 0.05)
+            test_type: 'ttest', 'welch', or 'ztest'
+            
+        Returns:
+            Dict with significance test results for each metric
+        """
+        if not SCIPY_AVAILABLE:
+            logger.warning("scipy required for significance testing. Install: pip install scipy")
+            return {}
+        
+        if baseline_idx >= len(self.results) or comparison_idx >= len(self.results):
+            raise IndexError("Invalid result index")
+        
+        baseline = self.results[baseline_idx]
+        comparison = self.results[comparison_idx]
+        
+        test_results = {}
+        
+        for metric in metrics:
+            baseline_val = self._find_metric_value(baseline, metric)
+            comparison_val = self._find_metric_value(comparison, metric)
+            
+            if baseline_val is None or comparison_val is None:
+                logger.warning(f"Metric '{metric}' not found in both results")
+                continue
+            
+            # Check if we have variance/std information
+            baseline_std = self._find_metric_value(baseline, f"{metric}_std")
+            comparison_std = self._find_metric_value(comparison, f"{metric}_std")
+            
+            if baseline_std is None or comparison_std is None:
+                logger.warning(f"No std deviation found for '{metric}'. "
+                             f"Run benchmarks with multiple iterations for statistical testing.")
+                continue
+            
+            # Get sample sizes (default to 10 if not specified)
+            baseline_n = self._find_metric_value(baseline, f"{metric}_n_runs")
+            if baseline_n is None:
+                baseline_n = 10
+            baseline_n = int(baseline_n)
+            
+            comparison_n = self._find_metric_value(comparison, f"{metric}_n_runs")
+            if comparison_n is None:
+                comparison_n = 10
+            comparison_n = int(comparison_n)
+            
+            # Perform statistical test
+            if test_type in ['ttest', 'welch']:
+                # Use Welch's t-test (doesn't assume equal variances)
+                se_diff = np.sqrt((baseline_std**2 / baseline_n) + (comparison_std**2 / comparison_n))
+                t_stat = (comparison_val - baseline_val) / se_diff if se_diff > 0 else 0.0
+                
+                # Degrees of freedom (Welch-Satterthwaite)
+                df = ((baseline_std**2 / baseline_n + comparison_std**2 / comparison_n)**2 /
+                      ((baseline_std**2 / baseline_n)**2 / (baseline_n - 1) +
+                       (comparison_std**2 / comparison_n)**2 / (comparison_n - 1)))
+                
+                p_value = 2 * (1 - scipy_stats.t.cdf(abs(t_stat), df))
+                statistic = t_stat
+                test_name = "Welch's t-test"
+                
+            elif test_type == 'ztest':
+                # Z-test for large samples
+                se_diff = np.sqrt((baseline_std**2 / baseline_n) + (comparison_std**2 / comparison_n))
+                z_stat = (comparison_val - baseline_val) / se_diff if se_diff > 0 else 0.0
+                p_value = 2 * (1 - scipy_stats.norm.cdf(abs(z_stat)))
+                statistic = z_stat
+                test_name = "Z-test"
+            else:
+                logger.warning(f"Unknown test type: {test_type}")
+                continue
+            
+            # Effect size (Cohen's d)
+            pooled_std = np.sqrt((baseline_std**2 + comparison_std**2) / 2)
+            cohens_d = (comparison_val - baseline_val) / pooled_std if pooled_std > 0 else 0.0
+            
+            test_results[metric] = {
+                'test': test_name,
+                'statistic': float(statistic),
+                'p_value': float(p_value),
+                'significant': p_value < alpha,
+                'alpha': alpha,
+                'cohens_d': float(cohens_d),
+                'effect_interpretation': self._interpret_cohens_d(abs(cohens_d)),
+                'baseline_mean': float(baseline_val),
+                'baseline_std': float(baseline_std),
+                'baseline_n': int(baseline_n),
+                'comparison_mean': float(comparison_val),
+                'comparison_std': float(comparison_std),
+                'comparison_n': int(comparison_n)
+            }
+        
+        return test_results
+    
+    def _interpret_cohens_d(self, d: float) -> str:
+        """Interpret Cohen's d effect size."""
+        if d < 0.2:
+            return "negligible"
+        elif d < 0.5:
+            return "small"
+        elif d < 0.8:
+            return "medium"
+        else:
+            return "large"
+    
+    def print_significance_test(
+        self,
+        baseline_idx: int,
+        comparison_idx: int,
+        metrics: List[str],
+        alpha: float = 0.05
+    ):
+        """Print formatted significance test results."""
+        results = self.statistical_significance_test(
+            baseline_idx, comparison_idx, metrics, alpha
+        )
+        
+        if not results:
+            print("\nNo significance tests performed. Ensure results contain std/variance information.")
+            print("Run benchmarks with multiple iterations to enable statistical testing.")
+            return
+        
+        baseline_name = self.result_names[baseline_idx]
+        comparison_name = self.result_names[comparison_idx]
+        
+        print("\n" + "="*80)
+        print(f"STATISTICAL SIGNIFICANCE TEST")
+        print(f"{comparison_name} vs {baseline_name} (baseline)")
+        print("="*80)
+        
+        for metric, test_result in results.items():
+            print(f"\n{metric}:")
+            print(f"  Test: {test_result['test']}")
+            print(f"  Baseline: {test_result['baseline_mean']:.4f} ± {test_result['baseline_std']:.4f} (n={test_result['baseline_n']})")
+            print(f"  Comparison: {test_result['comparison_mean']:.4f} ± {test_result['comparison_std']:.4f} (n={test_result['comparison_n']})")
+            print(f"  Statistic: {test_result['statistic']:.4f}")
+            print(f"  p-value: {test_result['p_value']:.4f}")
+            
+            if test_result['significant']:
+                print(f"  ✓ SIGNIFICANT (p < {test_result['alpha']})")
+            else:
+                print(f"  ✗ Not significant (p ≥ {test_result['alpha']})")
+            
+            print(f"  Effect size (Cohen's d): {test_result['cohens_d']:.4f} ({test_result['effect_interpretation']})")
+        
+        print("\n" + "="*80 + "\n")
+    
     def _detect_numeric_metrics(
         self,
         result1: Dict,
@@ -181,15 +344,12 @@ class ResultsComparator:
         
         metric_lower = metric.lower()
         
-        # Check if any higher_better keyword is in metric name
         if any(hb in metric_lower for hb in higher_better):
             return True
         
-        # Check if any lower_better keyword is in metric name
         if any(lb in metric_lower for lb in lower_better):
             return False
         
-        # Default to higher is better
         return True
     
     def print_comparison(
@@ -199,15 +359,7 @@ class ResultsComparator:
         metrics: Optional[List[str]] = None,
         show_all: bool = False
     ):
-        """
-        Print formatted comparison results.
-        
-        Args:
-            baseline_idx: Index of baseline result
-            comparison_idx: Index of comparison result
-            metrics: List of metrics to compare
-            show_all: Show all metrics (False = only improvements)
-        """
+        """Print formatted comparison results."""
         comparisons = self.compare_two(baseline_idx, comparison_idx, metrics)
         
         baseline_name = self.result_names[baseline_idx]
@@ -266,12 +418,7 @@ class ResultsComparator:
         comparison_idx: int,
         metrics: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """
-        Get summary statistics for comparison.
-        
-        Returns:
-            Dictionary with summary stats
-        """
+        """Get summary statistics for comparison."""
         comparisons = self.compare_two(baseline_idx, comparison_idx, metrics)
         
         improvements = [c for c in comparisons if c.improved]
@@ -312,12 +459,7 @@ class ResultsComparator:
         self,
         metrics: Optional[List[str]] = None
     ) -> Dict[Tuple[int, int], List[ComparisonResult]]:
-        """
-        Compare all pairs of results.
-        
-        Returns:
-            Dictionary mapping (baseline_idx, comparison_idx) to comparison results
-        """
+        """Compare all pairs of results."""
         if len(self.results) < 2:
             logger.warning("Need at least 2 results for pairwise comparison")
             return {}
@@ -335,16 +477,7 @@ class ResultsComparator:
         metric: str,
         higher_is_better: Optional[bool] = None
     ) -> Tuple[int, float, str]:
-        """
-        Find the best performing model for a metric.
-        
-        Args:
-            metric: Metric to optimize
-            higher_is_better: Whether higher is better (auto-detect if None)
-            
-        Returns:
-            (index, value, name) of best model
-        """
+        """Find the best performing model for a metric."""
         if higher_is_better is None:
             higher_is_better = self._is_higher_better(metric)
         
@@ -375,16 +508,7 @@ class ResultsComparator:
         metrics: List[str],
         weights: Optional[List[float]] = None
     ) -> List[Tuple[str, float]]:
-        """
-        Create a weighted leaderboard across multiple metrics.
-        
-        Args:
-            metrics: List of metrics to include
-            weights: Optional weights for each metric (equal if None)
-            
-        Returns:
-            List of (name, score) tuples sorted by score
-        """
+        """Create a weighted leaderboard across multiple metrics."""
         if weights is None:
             weights = [1.0] * len(metrics)
         
@@ -471,6 +595,10 @@ def main():
     parser.add_argument('--weights', nargs='+', type=float,
                        help='Weights for leaderboard metrics')
     parser.add_argument('--best', help='Find best model for this metric')
+    parser.add_argument('--significance', nargs='+',
+                       help='Test statistical significance for these metrics')
+    parser.add_argument('--alpha', type=float, default=0.05,
+                       help='Significance level (default: 0.05)')
     
     args = parser.parse_args()
     
@@ -483,6 +611,13 @@ def main():
         idx, value, name = comparator.find_best_model(args.best)
         print(f"\nBest model for '{args.best}': {name}")
         print(f"Value: {value:.4f}")
+    elif args.significance:
+        if len(comparator.results) < 2:
+            print("Need at least 2 results for significance testing")
+        else:
+            comparator.print_significance_test(
+                args.baseline, 1, args.significance, args.alpha
+            )
     else:
         # Compare against baseline
         for i in range(len(comparator.results)):

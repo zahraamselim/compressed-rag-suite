@@ -1,4 +1,4 @@
-"""Metrics for evaluating RAG system performance"""
+"""Metrics for evaluating RAG system performance - Added BLEU score."""
 
 import logging
 from typing import List, Dict, Optional
@@ -65,6 +65,22 @@ class RAGMetrics:
         except ImportError:
             self.bertscore_available = False
             logger.warning("bert-score not available. Install: pip install bert-score")
+        
+        # BLEU
+        try:
+            import nltk
+            try:
+                nltk.data.find('tokenizers/punkt')
+            except LookupError:
+                logger.info("Downloading NLTK punkt tokenizer for BLEU...")
+                nltk.download('punkt', quiet=True)
+            
+            from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+            self.bleu_available = True
+            self.smoothing_function = SmoothingFunction().method1
+        except ImportError:
+            self.bleu_available = False
+            logger.warning("NLTK not available for BLEU. Install: pip install nltk")
     
     def _normalize_text(self, text: str) -> str:
         """Normalize text based on configuration."""
@@ -110,6 +126,36 @@ class RAGMetrics:
         recall = num_common / len(ref_tokens)
         
         return 2 * (precision * recall) / (precision + recall)
+    
+    def bleu_score(self, prediction: str, reference: str) -> Optional[float]:
+        """
+        BLEU score for translation-style matching.
+        Uses sentence-level BLEU with smoothing.
+        """
+        if not self.bleu_available:
+            return None
+        
+        try:
+            from nltk.translate.bleu_score import sentence_bleu
+            
+            # Tokenize
+            ref_tokens = [self._normalize_text(reference).split()]
+            pred_tokens = self._normalize_text(prediction).split()
+            
+            if len(pred_tokens) == 0 or len(ref_tokens[0]) == 0:
+                return 0.0
+            
+            # Calculate BLEU with smoothing
+            score = sentence_bleu(
+                ref_tokens, 
+                pred_tokens, 
+                smoothing_function=self.smoothing_function
+            )
+            
+            return score
+        except Exception as e:
+            logger.warning(f"BLEU scoring failed: {e}")
+            return None
     
     def rouge_scores(self, prediction: str, reference: str) -> Dict[str, Optional[float]]:
         """
@@ -241,6 +287,13 @@ class RAGMetrics:
         results['f1_score'] = float(np.mean(f1_scores)) if f1_scores else 0.0
         results['answer_relevance'] = float(np.mean(relevances)) if relevances else 0.0
         results['avg_answer_length'] = float(np.mean([len(p.split()) for p in predictions]))
+        
+        # BLEU scores
+        if self.bleu_available:
+            bleu_scores = [self.bleu_score(pred, ref) 
+                          for pred, ref in zip(predictions, references)]
+            bleu_values = [s for s in bleu_scores if s is not None]
+            results['bleu'] = float(np.mean(bleu_values)) if bleu_values else None
         
         # ROUGE scores
         if self.rouge_available:

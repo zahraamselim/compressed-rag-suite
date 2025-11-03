@@ -1,4 +1,4 @@
-"""Energy estimation utilities."""
+"""Energy estimation utilities - Fixed with idle power consideration."""
 
 import logging
 from typing import Dict, Optional
@@ -6,15 +6,21 @@ from typing import Dict, Optional
 logger = logging.getLogger(__name__)
 
 
-def estimate_energy(latency_ms_per_token: float, tdp_watts: float) -> float:
+def estimate_energy(
+    latency_ms_per_token: float, 
+    tdp_watts: float,
+    idle_power_ratio: float = 0.3
+) -> float:
     """
-    Estimate energy consumption per token.
+    Estimate energy consumption per token with idle power consideration.
     
-    Energy (J) = Power (W) × Time (s)
+    Energy (J) = Active Power (W) × Time (s)
+    Active Power = TDP - Idle Power
     
     Args:
         latency_ms_per_token: Latency in milliseconds per token
         tdp_watts: Thermal Design Power in watts (device power consumption)
+        idle_power_ratio: Fraction of TDP consumed at idle (default: 0.3)
         
     Returns:
         Energy consumption in millijoules per token
@@ -23,16 +29,20 @@ def estimate_energy(latency_ms_per_token: float, tdp_watts: float) -> float:
         logger.warning(f"Invalid inputs: latency={latency_ms_per_token}, tdp={tdp_watts}")
         return 0.0
     
+    # Estimate active power (TDP - idle power)
+    idle_power = tdp_watts * idle_power_ratio
+    active_power = tdp_watts - idle_power
+    
     # Convert latency from ms to seconds
     latency_seconds = latency_ms_per_token / 1000.0
     
     # Calculate energy in joules
-    energy_joules = latency_seconds * tdp_watts
+    energy_joules = active_power * latency_seconds
     
     # Convert to millijoules
     energy_mj = energy_joules * 1000.0
     
-    logger.info(f"Energy per token: {energy_mj:.3f} mJ")
+    logger.info(f"Energy per token: {energy_mj:.3f} mJ (active power: {active_power:.1f}W, idle: {idle_power:.1f}W)")
     
     return energy_mj
 

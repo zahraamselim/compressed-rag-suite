@@ -823,6 +823,140 @@ class RetrievalBenchmark(ModelBenchmark[RetrievalResults]):
         covered = len(answer_tokens & context_tokens)
         return covered / len(answer_tokens)
     
+    def ablation_study(
+        self,
+        questions: List[str],
+        ground_truth_answers: List[str],
+        k_values: List[int] = [1, 3, 5, 10, 20],
+        documents: Optional[List[str]] = None,
+        save_results: bool = True,
+        output_dir: Optional[str] = None
+    ) -> Dict[int, RetrievalResults]:
+        """
+        Run ablation study varying top-k retrieval.
+        Shows how answer quality changes with more/fewer chunks.
+        
+        Args:
+            questions: List of questions
+            ground_truth_answers: Ground truth answers
+            k_values: List of k values to test
+            documents: Documents to index (if not already indexed)
+            save_results: Whether to save results for each k
+            output_dir: Directory to save results
+            
+        Returns:
+            Dict mapping k values to RetrievalResults
+        """
+        logger.info("="*60)
+        logger.info("STARTING ABLATION STUDY")
+        logger.info(f"Testing k values: {k_values}")
+        logger.info("="*60)
+        
+        # Index documents if provided
+        if documents:
+            logger.info(f"Indexing {len(documents)} documents...")
+            self.rag_pipeline.index_documents(documents, show_progress=True)
+        
+        # Store original top_k
+        original_k = self.rag_pipeline.retriever.top_k
+        
+        results = {}
+        
+        try:
+            for k in k_values:
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Testing with top_k={k}")
+                logger.info(f"{'='*60}")
+                
+                # Temporarily override retriever's top_k
+                self.rag_pipeline.retriever.top_k = k
+                
+                try:
+                    # Run evaluation
+                    result = self.run_all(
+                        questions=questions,
+                        ground_truth_answers=ground_truth_answers,
+                        measure_retrieval_quality=False,  # Skip IR metrics to save time
+                        measure_context_quality=True,
+                        measure_answer_quality=True,
+                        compare_no_rag=False  # Skip for efficiency
+                    )
+                    
+                    results[k] = result
+                    
+                    # Log key metrics
+                    logger.info(f"\nResults for k={k}:")
+                    logger.info(f"  Exact Match: {result.exact_match:.4f}")
+                    logger.info(f"  F1 Score: {result.f1_score:.4f}")
+                    if result.faithfulness:
+                        logger.info(f"  Faithfulness: {result.faithfulness:.4f}")
+                    if result.context_sufficiency:
+                        logger.info(f"  Context Sufficiency: {result.context_sufficiency:.4f}")
+                    
+                    # Save if requested
+                    if save_results and output_dir:
+                        output_path = Path(output_dir)
+                        output_path.mkdir(parents=True, exist_ok=True)
+                        result.to_json(str(output_path / f"ablation_k{k}_results.json"))
+                        logger.info(f"  Saved to {output_path / f'ablation_k{k}_results.json'}")
+                    
+                except Exception as e:
+                    logger.error(f"Ablation study failed for k={k}: {e}")
+                    results[k] = None
+                    continue
+        
+        finally:
+            # Restore original top_k
+            self.rag_pipeline.retriever.top_k = original_k
+            logger.info(f"\nRestored original top_k={original_k}")
+        
+        # Summary
+        logger.info("\n" + "="*60)
+        logger.info("ABLATION STUDY COMPLETE")
+        logger.info("="*60)
+        
+        # Print summary table
+        self._print_ablation_summary(results, k_values)
+        
+        return results
+    
+    def _print_ablation_summary(self, results: Dict[int, RetrievalResults], k_values: List[int]):
+        """Print summary table of ablation study results."""
+        print("\n" + "="*80)
+        print("ABLATION STUDY SUMMARY")
+        print("="*80)
+        
+        # Table header
+        header = f"{'k':>5} | {'EM':>8} | {'F1':>8} | {'Faith':>8} | {'Suff':>8} | {'Prec':>8}"
+        print("\n" + header)
+        print("-" * len(header))
+        
+        # Table rows
+        for k in k_values:
+            result = results.get(k)
+            if result is None:
+                print(f"{k:>5} | {'FAILED':>8} | {'-':>8} | {'-':>8} | {'-':>8} | {'-':>8}")
+                continue
+            
+            em = f"{result.exact_match:.4f}" if result.exact_match is not None else "N/A"
+            f1 = f"{result.f1_score:.4f}" if result.f1_score is not None else "N/A"
+            faith = f"{result.faithfulness:.4f}" if result.faithfulness is not None else "N/A"
+            suff = f"{result.context_sufficiency:.4f}" if result.context_sufficiency is not None else "N/A"
+            prec = f"{result.context_precision:.4f}" if result.context_precision is not None else "N/A"
+            
+            print(f"{k:>5} | {em:>8} | {f1:>8} | {faith:>8} | {suff:>8} | {prec:>8}")
+        
+        print()
+        
+        # Find optimal k
+        valid_results = {k: r for k, r in results.items() if r is not None and r.f1_score is not None}
+        if valid_results:
+            best_k = max(valid_results.keys(), key=lambda k: valid_results[k].f1_score)
+            best_f1 = valid_results[best_k].f1_score
+            print(f"Best k: {best_k} (F1={best_f1:.4f})")
+        
+        print("="*80 + "\n")
+
     def evaluate_from_file(self, dataset_path: str, **kwargs) -> RetrievalResults:
         """Run evaluation from a dataset file."""
         logger.info(f"Loading dataset from {dataset_path}")
