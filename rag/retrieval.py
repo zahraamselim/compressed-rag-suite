@@ -73,8 +73,8 @@ class ContextRetriever:
             # So: cos(θ) = 1 - (L2^2 / 2)
             # Clamp distance to [0, 2] and convert
             distance = max(0.0, min(2.0, distance))
-            similarity = 1.0 - (distance / 2.0)
-            return max(0.0, min(1.0, similarity))
+            cosine_sim = 1.0 - (distance * distance / 2.0)
+            return max(0.0, min(1.0, cosine_sim))
         
         elif self.distance_metric == 'l2':
             # For L2 distance, use exponential decay

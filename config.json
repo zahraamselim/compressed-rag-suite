@@ -7,9 +7,9 @@
     },
     "chunking": {
       "strategy": "semantic",
-      "chunk_size": 512,
-      "chunk_overlap": 50,
-      "min_chunk_size": 100
+      "chunk_size": 384,
+      "chunk_overlap": 96,
+      "min_chunk_size": 128
     },
     "embedding": {
       "model_name": "sentence-transformers/all-MiniLM-L6-v2",
@@ -18,22 +18,22 @@
       "normalize": true
     },
     "retrieval": {
-      "top_k": 3,
-      "similarity_threshold": 0.0,
-      "rerank": false,
-      "diversity_penalty": 0.0
+      "top_k": 5,
+      "similarity_threshold": 0.65,
+      "rerank": true,
+      "diversity_penalty": 0.15
     },
     "generation": {
-      "max_new_tokens": 100,
-      "temperature": 0.1,
-      "top_p": 0.95,
+      "max_new_tokens": 64,
+      "temperature": 0.0,
+      "top_p": 1.0,
       "do_sample": false,
-      "repetition_penalty": 1.0,
+      "repetition_penalty": 1.2,
       "use_chat_template": true
     },
     "vector_store": {
       "collection_name": "rag_documents",
-      "persist_directory": null
+      "persist_directory": "./vector_db"
     }
   },
   "model": {
@@ -99,126 +99,6 @@
             "num_fewshot": 0,
             "limit": null,
             "description": "Commonsense reasoning - physical interactions"
-          },
-          "siqa": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Commonsense reasoning - social interactions"
-          },
-          "openbookqa": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Commonsense reasoning - elementary science"
-          },
-          "arc_easy": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Commonsense reasoning - science questions (easy)"
-          },
-          "arc_challenge": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Commonsense reasoning - science questions (hard)"
-          },
-          "commonsense_qa": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Commonsense reasoning - general knowledge"
-          },
-          "nq_open": {
-            "enabled": false,
-            "num_fewshot": 5,
-            "limit": null,
-            "description": "World knowledge - Natural Questions"
-          },
-          "triviaqa": {
-            "enabled": false,
-            "num_fewshot": 5,
-            "limit": null,
-            "description": "World knowledge - trivia questions"
-          },
-          "boolq": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Reading comprehension - boolean questions"
-          },
-          "quac": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Reading comprehension - conversational QA"
-          },
-          "gsm8k": {
-            "enabled": false,
-            "num_fewshot": 8,
-            "limit": null,
-            "description": "Math reasoning - grade school math"
-          },
-          "hendrycks_math": {
-            "enabled": false,
-            "num_fewshot": 4,
-            "limit": null,
-            "description": "Math reasoning - competition mathematics"
-          },
-          "humaneval": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Code generation - Python (pass@1)"
-          },
-          "mbpp": {
-            "enabled": false,
-            "num_fewshot": 3,
-            "limit": null,
-            "description": "Code generation - Python problems"
-          },
-          "mmlu": {
-            "enabled": false,
-            "num_fewshot": 5,
-            "limit": null,
-            "description": "Aggregate - Massive Multitask Language Understanding"
-          },
-          "bbh": {
-            "enabled": false,
-            "num_fewshot": 3,
-            "limit": null,
-            "description": "Aggregate - BIG-Bench Hard"
-          },
-          "agieval": {
-            "enabled": false,
-            "num_fewshot": 3,
-            "limit": null,
-            "description": "Aggregate - AGI Eval (English only)"
-          },
-          "lambada": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Language understanding - word prediction"
-          },
-          "storycloze": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Language understanding - story completion"
-          },
-          "glue": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "NLP benchmark suite"
-          },
-          "super_glue": {
-            "enabled": false,
-            "num_fewshot": 0,
-            "limit": null,
-            "description": "Advanced NLP benchmark suite"
           }
         }
       }
@@ -229,21 +109,17 @@
       "measure_answer_quality": true,
       "compare_no_rag": true,
       "k_values": [1, 3, 5, 10],
-
       "relevance_token_threshold": 0.3,
       "sufficiency_token_threshold": 0.8,
       "ndcg_gain_type": "exponential",
-
       "normalize_whitespace": true,
       "case_sensitive": false,
       "remove_punctuation": false,
       "faithfulness_method": "token_containment",
       "relevance_method": "token_overlap",
-
       "rouge_use_stemmer": true,
       "bertscore_lang": "en",
       "bertscore_model": null,
-
       "dataset_path": null,
       "use_custom_dataset": false
     },

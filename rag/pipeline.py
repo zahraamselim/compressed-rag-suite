@@ -162,6 +162,25 @@ class RAGPipeline:
         """
         return self.retriever.retrieve(query, top_k=top_k)
     
+    def validate_retrieval(self, query: str, expected_terms: List[str]) -> Dict:
+        """Validate that retrieval finds expected terms."""
+        chunks = self.retrieve(query, top_k=5)
+        
+        found_terms = []
+        for term in expected_terms:
+            for chunk in chunks:
+                if term.lower() in chunk['text'].lower():
+                    found_terms.append(term)
+                    break
+        
+        return {
+            'query': query,
+            'expected': expected_terms,
+            'found': found_terms,
+            'recall': len(found_terms) / len(expected_terms),
+            'chunks': chunks
+        }
+
     def generate_answer(
         self,
         query: str,

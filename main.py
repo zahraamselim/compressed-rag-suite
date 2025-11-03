@@ -28,6 +28,11 @@ def parse_torch_dtype(dtype_str: str):
     }
     return dtype_map.get(dtype_str, torch.float16)
 
+def should_retrieve(query: str, model_interface) -> bool:
+    """Classify if query needs retrieval."""
+    # Simple heuristic - check if query is about the document
+    keywords = ['what', 'how', 'why', 'explain', 'describe', 'define']
+    return any(kw in query.lower() for kw in keywords)
 
 def main():
     parser = argparse.ArgumentParser(description='RAG Evaluation System')
@@ -89,20 +94,36 @@ def main():
         # Test query if provided
         if args.query:
             logger.info(f"Query: {args.query}")
-            result = pipeline.query(args.query, return_context=True, return_chunks=True)
             
-            print("\n" + "="*80)
-            print("QUERY:", args.query)
-            print("="*80)
-            print("\nRETRIEVED CHUNKS:")
-            for i, chunk in enumerate(result['chunks'], 1):
-                print(f"\n[Chunk {i}] (score: {chunk['score']:.3f})")
-                print(chunk['text'][:200] + "...")
-            
-            print("\n" + "="*80)
-            print("ANSWER:")
-            print(result['answer'])
-            print("="*80 + "\n")
+            if should_retrieve(args.query, model_interface):
+                result = pipeline.query(args.query, return_context=True, return_chunks=True)
+                
+                print("\n" + "="*80)
+                print("QUERY:", args.query)
+                print("="*80)
+                
+                if 'chunks' in result and result['chunks']:
+                    print("\nRETRIEVED CHUNKS:")
+                    for i, chunk in enumerate(result['chunks'], 1):
+                        print(f"\n[Chunk {i}] (score: {chunk['score']:.3f})")
+                        print(chunk['text'][:200] + ("..." if len(chunk['text']) > 200 else ""))
+                
+                print("\n" + "="*80)
+                print("ANSWER:")
+                print(result['answer'])
+                print("="*80 + "\n")
+            else:
+                # Direct generation without RAG
+                answer = model_interface.generate(args.query, max_new_tokens=64)
+                
+                print("\n" + "="*80)
+                print("QUERY:", args.query)
+                print("="*80)
+                print("\nMODE: Direct generation (no retrieval)")
+                print("\n" + "="*80)
+                print("ANSWER:")
+                print(answer)
+                print("="*80 + "\n")
         
         # Run evaluation if requested
         if args.evaluate or args.eval_efficiency or args.eval_performance or args.eval_retrieval:
