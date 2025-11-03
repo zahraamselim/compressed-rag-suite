@@ -1,4 +1,4 @@
-"""LLM answer generation with RAG - FIXED for better faithfulness."""
+"""LLM answer generation with RAG - IMPROVED VERSION."""
 
 import logging
 import re
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class RAGGenerator:
     """
     Generate answers using LLM with retrieved context.
-    FIXED: Better prompts and validation for faithful responses.
+    IMPROVED: Better balance between faithfulness and natural generation.
     """
     
     def __init__(self, model_interface, config: dict):
@@ -23,16 +23,18 @@ class RAGGenerator:
         """
         self.model_interface = model_interface
         
-        self.max_new_tokens = config.get('max_new_tokens', 64)
-        self.temperature = config.get('temperature', 0.1)  # Slightly raised from 0.0
+        self.max_new_tokens = config.get('max_new_tokens', 128)
+        self.temperature = config.get('temperature', 0.3)  # Raised from 0.1
         self.top_p = config.get('top_p', 0.9)
-        self.do_sample = config.get('do_sample', False)
-        self.repetition_penalty = config.get('repetition_penalty', 1.2)
+        self.do_sample = config.get('do_sample', True)  # Enable sampling
+        self.repetition_penalty = config.get('repetition_penalty', 1.15)
         
         self.model_type = model_interface.model_type or "instruct"
         self.use_chat_template = config.get('use_chat_template', True)
         
         logger.info(f"Initialized RAG generator for {self.model_type} model")
+        logger.info(f"  Temperature: {self.temperature}")
+        logger.info(f"  Max tokens: {self.max_new_tokens}")
     
     def generate(
         self,
@@ -51,17 +53,20 @@ class RAGGenerator:
         Returns:
             Generated answer (or tuple with prompt)
         """
+        # Truncate context if too long (prevent overwhelming the model)
+        context = self._truncate_context(context, max_chars=2000)
+        
         # Format prompt based on model type
         if self.model_type == "instruct":
             prompt = self._format_instruct_prompt(query, context)
         else:
             prompt = self._format_base_prompt(query, context)
         
-        # Generate with slightly relaxed parameters
+        # Generate with balanced parameters
         answer = self.model_interface.generate(
             prompt=prompt,
             max_new_tokens=self.max_new_tokens,
-            temperature=self.temperature,  # Use config temperature
+            temperature=self.temperature,
             do_sample=self.do_sample,
             top_p=self.top_p,
             repetition_penalty=self.repetition_penalty
@@ -69,27 +74,21 @@ class RAGGenerator:
         
         answer = self._clean_answer(answer)
         
-        # Validate and potentially regenerate
-        if not self._validate_answer(answer, context, query):
-            logger.warning(f"Answer failed validation. Query: {query[:50]}...")
-            logger.warning(f"Answer: {answer[:100]}...")
+        # Light validation (less strict)
+        if self._is_problematic(answer, context):
+            logger.warning(f"Answer seems problematic: {answer[:80]}...")
             
-            # Try regeneration with stricter prompt
-            logger.info("Retrying with stricter prompt...")
-            strict_prompt = self._format_strict_prompt(query, context)
+            # Try once more with a clearer prompt
+            logger.info("Retrying with simplified prompt...")
+            simple_prompt = self._format_simple_prompt(query, context)
             answer = self.model_interface.generate(
-                prompt=strict_prompt,
+                prompt=simple_prompt,
                 max_new_tokens=self.max_new_tokens,
-                temperature=0.0,  # Greedy for retry
-                do_sample=False,
+                temperature=0.2,  # Lower for retry
+                do_sample=True,
                 repetition_penalty=self.repetition_penalty
             )
             answer = self._clean_answer(answer)
-            
-            # If still fails, return safe fallback
-            if not self._validate_answer(answer, context, query):
-                logger.warning("Retry also failed validation. Using fallback.")
-                answer = "Based on the provided context, the information is not clearly specified."
         
         if return_prompt:
             return answer, prompt
@@ -165,31 +164,40 @@ class RAGGenerator:
         
         return answers
     
+    def _truncate_context(self, context: str, max_chars: int = 2000) -> str:
+        """
+        Truncate context to prevent overwhelming the model.
+        Tries to keep complete sentences.
+        """
+        if len(context) <= max_chars:
+            return context
+        
+        # Try to truncate at sentence boundary
+        truncated = context[:max_chars]
+        last_period = truncated.rfind('.')
+        
+        if last_period > max_chars * 0.7:  # If we can keep at least 70%
+            return truncated[:last_period + 1]
+        
+        return truncated + "..."
+    
     def _format_instruct_prompt(self, query: str, context: str) -> str:
         """
-        FIXED: Much stronger prompt that forces context-only answers.
+        IMPROVED: More natural prompt that encourages synthesis.
         """
         tokenizer = self.model_interface.get_tokenizer()
         
         if self.use_chat_template and hasattr(tokenizer, 'apply_chat_template'):
             messages = [{
                 "role": "user",
-                "content": f"""You are a precise question-answering assistant. You must ONLY use information from the context provided below.
+                "content": f"""Use the following context to answer the question. Provide a clear, direct answer based on the information given.
 
-CONTEXT:
+Context:
 {context}
 
-QUESTION: {query}
+Question: {query}
 
-INSTRUCTIONS:
-- Read the context carefully
-- Answer using ONLY information found in the context above
-- If the context doesn't contain the answer, respond with: "The context does not provide this information."
-- Be concise (1-3 sentences maximum)
-- Do NOT use any external knowledge
-- Quote or paraphrase directly from the context
-
-ANSWER:"""
+Answer:"""
             }]
             
             try:
@@ -201,31 +209,21 @@ ANSWER:"""
             except Exception as e:
                 logger.warning(f"Chat template failed: {e}, using fallback format")
         
-        # Fallback format
+        # Fallback format (simpler)
         return f"""Context: {context}
 
 Question: {query}
 
-Instructions: Answer using ONLY the context above. If not in context, say "Not provided in context."
-
-Answer:"""
+Based on the context above, provide a clear and concise answer:"""
     
-    def _format_strict_prompt(self, query: str, context: str) -> str:
-        """Extra strict prompt for retry attempts."""
-        return f"""CONTEXT (this is the ONLY information you can use):
----
+    def _format_simple_prompt(self, query: str, context: str) -> str:
+        """Simplified prompt for retry attempts."""
+        return f"""Use this information to answer the question:
+
 {context}
----
 
-QUESTION: {query}
-
-STRICT RULES:
-1. You MUST extract your answer DIRECTLY from the context above
-2. Do NOT add any information not in the context
-3. If the answer is not in the context, respond: "Not provided in context."
-4. Maximum 2 sentences
-
-ANSWER (extract from context):"""
+Question: {query}
+Answer:"""
     
     def _format_base_prompt(self, query: str, context: str) -> str:
         """Format prompt for base models."""
@@ -233,7 +231,7 @@ ANSWER (extract from context):"""
 
 Question: {query}
 
-Answer based only on the context above (1-2 sentences):"""
+Answer:"""
     
     def _format_instruct_prompt_no_rag(self, query: str) -> str:
         """Format prompt without context for instruct models."""
@@ -242,7 +240,7 @@ Answer based only on the context above (1-2 sentences):"""
         if self.use_chat_template and hasattr(tokenizer, 'apply_chat_template'):
             messages = [{
                 "role": "user",
-                "content": f"Question: {query}\n\nAnswer:"
+                "content": query
             }]
             try:
                 return tokenizer.apply_chat_template(
@@ -259,10 +257,9 @@ Answer based only on the context above (1-2 sentences):"""
         """Format prompt without context for base models."""
         return f"Question: {query}\n\nAnswer:"
     
-    def _clean_answer(self, answer: str, max_sentences: int = 3) -> str:
+    def _clean_answer(self, answer: str, max_sentences: int = 4) -> str:
         """
         Clean and normalize generated answer.
-        Limit to max_sentences.
         """
         if not answer or answer.lower() in ['', 'none', 'n/a']:
             return "The information is not provided in the given context."
@@ -274,106 +271,83 @@ Answer based only on the context above (1-2 sentences):"""
         answer = re.sub(r'^(Answer:|A:)\s*', '', answer, flags=re.IGNORECASE)
         answer = answer.strip()
         
-        # Split into sentences more carefully
-        sentences = []
-        current = ""
+        # Remove "Based on the context" prefix if it's redundant
+        answer = re.sub(r'^Based on (the )?(context|information)( provided)?,?\s*', '', answer, flags=re.IGNORECASE)
         
-        for char in answer:
-            current += char
-            if char in '.!?' and (not current or current[-1] in '.!?'):
-                sentences.append(current.strip())
-                current = ""
+        # Split into sentences
+        sentences = re.split(r'([.!?])\s+', answer)
         
-        if current.strip():
-            sentences.append(current.strip())
+        # Reconstruct sentences properly
+        reconstructed = []
+        for i in range(0, len(sentences) - 1, 2):
+            if i + 1 < len(sentences):
+                reconstructed.append(sentences[i] + sentences[i + 1])
+            else:
+                reconstructed.append(sentences[i])
         
-        # Filter out empty sentences
-        sentences = [s for s in sentences if len(s.strip()) > 3]
+        # Filter out very short sentences
+        reconstructed = [s for s in reconstructed if len(s.strip()) > 10]
         
         # Take only first N sentences
-        if len(sentences) > max_sentences:
-            answer = ' '.join(sentences[:max_sentences])
-            if not answer.endswith(('.', '!', '?')):
-                answer += '.'
+        if len(reconstructed) > max_sentences:
+            answer = ' '.join(reconstructed[:max_sentences])
+        else:
+            answer = ' '.join(reconstructed)
+        
+        # Ensure it ends with punctuation
+        if answer and not answer[-1] in '.!?':
+            answer += '.'
         
         return answer
     
-    def _validate_answer(
-        self, 
-        answer: str, 
-        context: str, 
-        query: str = "",
-        min_overlap: float = 0.4,  # Increased from 0.3
-        min_context_words: int = 3  # NEW: require minimum context words
-    ) -> bool:
+    def _is_problematic(self, answer: str, context: str) -> bool:
         """
-        FIXED: Better validation that checks for hallucination.
+        IMPROVED: Light validation to catch obvious problems only.
         
         Args:
             answer: Generated answer
             context: Retrieved context
-            query: Original query (to filter out query words)
-            min_overlap: Minimum token overlap ratio (0-1)
-            min_context_words: Minimum number of context words required in answer
             
         Returns:
-            True if answer appears grounded, False if hallucinating
+            True if answer has obvious problems
         """
-        # Don't validate fallback responses
         answer_lower = answer.lower()
+        
+        # Check for fallback/error responses
         if any(phrase in answer_lower for phrase in [
-            "not provided", "not in the context", "not clearly specified",
-            "does not provide", "cannot be answered"
+            "not provided", "not in the context", "cannot answer",
+            "insufficient information", "does not specify"
         ]):
+            return False  # These are fine
+        
+        # Check if answer is just repeating large chunks of context verbatim
+        answer_clean = answer.lower().replace('.', '').replace(',', '').strip()
+        context_clean = context.lower().replace('.', '').replace(',', '').strip()
+        
+        # Find longest common substring
+        answer_words = answer_clean.split()
+        context_words = context_clean.split()
+        
+        # Check for very long verbatim copies (10+ words in a row)
+        for i in range(len(answer_words) - 10):
+            answer_segment = ' '.join(answer_words[i:i+10])
+            if answer_segment in context_clean:
+                logger.warning("Answer contains long verbatim copy from context")
+                return True
+        
+        # Check if answer is too short (< 15 words)
+        if len(answer_words) < 15:
+            logger.debug("Answer might be too short")
             return True
         
-        # Tokenize (simple word-based)
-        answer_tokens = set(answer.lower().split())
-        context_tokens = set(context.lower().split())
-        query_tokens = set(query.lower().split()) if query else set()
+        # Check for repetition in answer itself
+        if len(answer_words) >= 10:
+            # Check if first half repeats in second half
+            half = len(answer_words) // 2
+            first_half = ' '.join(answer_words[:half])
+            second_half = ' '.join(answer_words[half:])
+            if first_half in second_half or second_half in first_half:
+                logger.warning("Answer contains repetition")
+                return True
         
-        # Remove stopwords and short tokens
-        stopwords = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
-            'this', 'that', 'these', 'those', 'it', 'its', 'as', 'which', 'what',
-            'who', 'when', 'where', 'why', 'how', 'can', 'will', 'would', 'should'
-        }
-        
-        # Filter answer tokens
-        answer_tokens = {
-            t for t in answer_tokens 
-            if len(t) > 2 and t not in stopwords and t not in query_tokens
-        }
-        
-        # Filter context tokens
-        context_tokens = {
-            t for t in context_tokens 
-            if len(t) > 2 and t not in stopwords
-        }
-        
-        if not answer_tokens:
-            logger.debug("Answer too short for validation")
-            return True  # Very short answer, can't validate properly
-        
-        # Calculate overlap
-        overlap_tokens = answer_tokens & context_tokens
-        overlap_ratio = len(overlap_tokens) / len(answer_tokens)
-        
-        # Check minimum context words
-        has_min_words = len(overlap_tokens) >= min_context_words
-        
-        logger.debug(f"Validation: {len(overlap_tokens)}/{len(answer_tokens)} tokens from context ({overlap_ratio:.2%})")
-        logger.debug(f"Min words check: {len(overlap_tokens)} >= {min_context_words}: {has_min_words}")
-        
-        # More lenient: pass if either condition is met
-        passed = overlap_ratio >= min_overlap or has_min_words
-        
-        if not passed:
-            logger.warning(f"Validation FAILED:")
-            logger.warning(f"  Overlap: {overlap_ratio:.2%} < {min_overlap:.2%}")
-            logger.warning(f"  Context words: {len(overlap_tokens)} < {min_context_words}")
-            logger.warning(f"  Answer: {answer[:100]}...")
-            logger.warning(f"  Missing key words: {answer_tokens - context_tokens}")
-        
-        return passed
+        return False

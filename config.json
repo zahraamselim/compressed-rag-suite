@@ -7,9 +7,9 @@
     },
     "chunking": {
       "strategy": "semantic",
-      "chunk_size": 384,
-      "chunk_overlap": 96,
-      "min_chunk_size": 128
+      "chunk_size": 512,
+      "chunk_overlap": 128,
+      "min_chunk_size": 150
     },
     "embedding": {
       "model_name": "sentence-transformers/all-MiniLM-L6-v2",
@@ -18,17 +18,17 @@
       "normalize": true
     },
     "retrieval": {
-      "top_k": 5,
-      "similarity_threshold": 0.65,
+      "top_k": 3,
+      "similarity_threshold": 0.3,
       "rerank": true,
-      "diversity_penalty": 0.15
+      "diversity_penalty": 0.1
     },
     "generation": {
       "max_new_tokens": 128,
-      "temperature": 0.1,
+      "temperature": 0.3,
       "top_p": 0.9,
-      "do_sample": false,
-      "repetition_penalty": 1.1,
+      "do_sample": true,
+      "repetition_penalty": 1.15,
       "use_chat_template": true
     },
     "vector_store": {
