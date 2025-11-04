@@ -2,8 +2,8 @@
 
 import torch
 from typing import Optional
-from pathlib import Path
 import logging
+from pathlib import Path
 
 from models.model_interface import ModelInterface
 
@@ -12,13 +12,13 @@ logger = logging.getLogger(__name__)
 
 class HQQModel(ModelInterface):
     """
-    HQQ (Half-Quadratic Quantization) model.
+    HQQ (Half-Quadratic Quantization) quantized model.
     
     Requires: hqq
     pip install hqq
     
-    Supports 2/3/4/8-bit quantization with flexible group sizes.
-    Can quantize on-the-fly or load pre-quantized models.
+    Supports 2/3/4/8-bit quantization with various configurations.
+    Can quantize models on-the-fly or load pre-quantized models.
     """
     
     def load(
@@ -27,7 +27,7 @@ class HQQModel(ModelInterface):
         nbits: int = 4,
         group_size: int = 64,
         axis: int = 1,
-        device: str = "cuda",
+        device: str = 'cuda',
         compute_dtype: torch.dtype = torch.float16,
         save_dir: Optional[str] = None,
         force_quantize: bool = False,
@@ -36,25 +36,25 @@ class HQQModel(ModelInterface):
         **kwargs
     ):
         """
-        Load or quantize HQQ model.
+        Load or quantize model with HQQ.
         
         Args:
-            model_path: Path or HF hub model ID (FP16 model to quantize)
-            nbits: Number of bits (2, 3, 4, or 8)
+            model_path: Path or HF hub model ID
+            nbits: Number of bits for quantization (2, 3, 4, or 8)
             group_size: Quantization group size
             axis: Quantization axis (0 or 1)
-            device: Device to load on
-            compute_dtype: Compute dtype for quantization
+            device: Device to load model on
+            compute_dtype: Compute dtype (torch.float16 or torch.bfloat16)
             save_dir: Directory to save/load quantized model
-            force_quantize: Force re-quantization even if save_dir exists
+            force_quantize: Force re-quantization even if quantized model exists
             trust_remote_code: Whether to trust remote code
             model_type: 'base' or 'instruct'
             **kwargs: Additional arguments
         """
         try:
-            from hqq.core.quantize import BaseQuantizeConfig
             from hqq.models.hf.base import AutoHQQHFModel
-            from transformers import AutoTokenizer, AutoModelForCausalLM
+            from hqq.core.quantize import BaseQuantizeConfig
+            from transformers import AutoTokenizer
         except ImportError:
             raise ImportError(
                 "hqq is required for HQQ models. "
@@ -67,76 +67,76 @@ class HQQModel(ModelInterface):
         self.device = device
         
         try:
-            # Determine save directory
-            if save_dir is None:
-                save_dir = f"./hqq_{nbits}bit_{Path(model_path).name}"
-            
-            save_path = Path(save_dir)
-            
-            # Check if pre-quantized model exists
-            if save_path.exists() and not force_quantize:
-                logger.info(f"Loading pre-quantized HQQ model from {save_dir}")
-                
-                # Load quantized model
-                self.model, self.tokenizer = AutoHQQHFModel.from_quantized(str(save_path))
-                self.model = self.model.to(device).eval()
-                
-            else:
-                # Quantize model
-                logger.info(f"Quantizing model to {nbits}-bit (may take 5-10 minutes)...")
-                
-                # Load FP16 model
-                model_fp16 = AutoModelForCausalLM.from_pretrained(
-                    model_path,
-                    torch_dtype=torch.float16,
-                    low_cpu_mem_usage=True,
-                    trust_remote_code=trust_remote_code
-                )
-                
-                # Load tokenizer
-                self.tokenizer = AutoTokenizer.from_pretrained(
-                    model_path,
-                    trust_remote_code=trust_remote_code
-                )
-                
-                # Create quantization config
-                quant_config = BaseQuantizeConfig(
-                    nbits=nbits,
-                    group_size=group_size,
-                    axis=axis
-                )
-                
-                # Quantize
-                logger.info(f"  Config: {nbits}-bit, group_size={group_size}, axis={axis}")
-                AutoHQQHFModel.quantize_model(
-                    model_fp16,
-                    quant_config=quant_config,
-                    compute_dtype=compute_dtype,
-                    device=device
-                )
-                
-                self.model = model_fp16
-                
-                # Save quantized model
-                if save_dir:
-                    logger.info(f"Saving quantized model to {save_dir}")
-                    save_path.mkdir(parents=True, exist_ok=True)
-                    AutoHQQHFModel.save_quantized(self.model, str(save_path))
-                    self.tokenizer.save_pretrained(str(save_path))
-                    logger.info(f"Model saved to {save_dir}")
+            # Load tokenizer first
+            logger.info("Loading tokenizer...")
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_path,
+                trust_remote_code=trust_remote_code
+            )
             
             # Set pad token if not present
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
                 self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
             
-            self.model.eval()
+            # Check if pre-quantized model exists
+            if save_dir and not force_quantize:
+                save_path = Path(save_dir)
+                if save_path.exists() and (save_path / "qmodel.pt").exists():
+                    logger.info(f"Loading pre-quantized HQQ model from {save_dir}")
+                    
+                    # Load quantized model - returns only model, not tuple
+                    self.model = AutoHQQHFModel.from_quantized(str(save_path))
+                    self.model = self.model.to(device).eval()
+                    
+                    logger.info("Pre-quantized model loaded successfully")
+                else:
+                    logger.info("No pre-quantized model found, will quantize from scratch")
+                    force_quantize = True
+            else:
+                force_quantize = True
+            
+            # Quantize model if needed
+            if force_quantize:
+                logger.info(f"Quantizing model with HQQ ({nbits}-bit, group_size={group_size})")
+                
+                # Create quantization config
+                quant_config = BaseQuantizeConfig(
+                    nbits=nbits,
+                    group_size=group_size,
+                    quant_zero=True,
+                    quant_scale=False,
+                    axis=axis
+                )
+                
+                # Load and quantize model
+                self.model = AutoHQQHFModel.from_pretrained(
+                    model_path,
+                    torch_dtype=compute_dtype,
+                    trust_remote_code=trust_remote_code
+                )
+                
+                # Quantize
+                self.model.quantize_model(
+                    quant_config=quant_config,
+                    compute_dtype=compute_dtype,
+                    device=device
+                )
+                
+                self.model.eval()
+                
+                # Save quantized model if save_dir provided
+                if save_dir:
+                    save_path = Path(save_dir)
+                    save_path.mkdir(parents=True, exist_ok=True)
+                    logger.info(f"Saving quantized model to {save_dir}")
+                    self.model.save_quantized(str(save_path))
+                    logger.info("Quantized model saved successfully")
             
             # Log model info
             info = self.get_model_info()
-            logger.info(f"HQQ model loaded successfully")
+            logger.info("HQQ model ready")
             logger.info(f"  Type: {info.get('model_type', 'unknown')}")
-            logger.info(f"  Quantization: {nbits}-bit")
             logger.info(f"  Size: {info.get('size_gb', 0):.2f} GB")
             logger.info(f"  Parameters: {info.get('num_parameters', 0):,}")
             logger.info(f"  Device: {info['device']}")

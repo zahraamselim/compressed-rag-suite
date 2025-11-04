@@ -1,0 +1,21 @@
+{
+  "model": {
+    "name": "Mistral 7B Instruct v0.1",
+    "precision": "FP16",
+    "parameters": 7241732096,
+    "size_gb": 13.488777160644531
+  },
+  "efficiency": {
+    "latency_ms_per_token": 62.48158874800038,
+    "throughput_tokens_per_sec": 15.969025654605144,
+    "peak_memory_gb": 6.846338748931885
+  },
+  "performance": {
+    "perplexity": 12.788209403564618,
+    "average_accuracy": 0.5275
+  },
+  "retrieval": {
+    "f1_score": 0.18304144328444036,
+    "faithfulness": 0.4136087693474285
+  }
+}

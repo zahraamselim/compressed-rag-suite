@@ -1,0 +1,23 @@
+{
+  "model": {
+    "name": "Mistral 7B Instruct v0.1",
+    "precision": "NF4 4-bit",
+    "quantization_method": "BitsAndBytes NF4",
+    "double_quantization": true,
+    "parameters": 3752071168,
+    "size_gb": 3.7387771606445312
+  },
+  "efficiency": {
+    "latency_ms_per_token": 84.13969510180975,
+    "throughput_tokens_per_sec": 11.60369459227907,
+    "peak_memory_gb": 1.815539836883545
+  },
+  "performance": {
+    "perplexity": 13.016013677702002,
+    "average_accuracy": 0.5199999999999999
+  },
+  "retrieval": {
+    "f1_score": 0.13335168647355894,
+    "faithfulness": 0.33299755799755804
+  }
+}

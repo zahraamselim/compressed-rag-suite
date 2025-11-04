@@ -1,0 +1,12 @@
+{
+  "perplexity": 12.854014814082205,
+  "perplexity_dataset": "wikitext/wikitext-2-raw-v1",
+  "lm_eval_scores": {
+    "hellaswag": 0.68,
+    "arc_easy": 0.75,
+    "arc_challenge": 0.6,
+    "humaneval": 0.05
+  },
+  "average_accuracy": 0.52,
+  "num_tasks_evaluated": 4
+}

@@ -1,0 +1,717 @@
+% File tacl2021v1.tex
+% Dec. 15, 2021
+
+% The English content of this file was modified from various *ACL instructions
+% by Lillian Lee and Kristina Toutanova
+%
+% LaTeXery is mostly all adapted from acl2018.sty.
+
+\documentclass[11pt,a4paper]{article}
+\usepackage{times,latexsym}
+\usepackage{url}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{threeparttable} 
+\usepackage{amsthm}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage[switch]{lineno}
+\usepackage{makecell}
+\usepackage[edges]{forest}
+\definecolor{hidden-draw}{RGB}{205, 44, 36}
+\definecolor{hidden-blue}{RGB}{194,232,247}
+\definecolor{hidden-orange}{RGB}{243,202,120}
+\definecolor{hidden-yellow}{RGB}{242,244,193}
+\definecolor{tree-level-1}{RGB}{245,20,85}
+\definecolor{tree-level-2}{RGB}{246,86,118}
+\definecolor{tree-level-3}{RGB}{248,177,193}
+\definecolor{tree-leaf}{RGB}{176,230,198}
+
+\usepackage{amsmath}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{remark}{Remark}
+%% Package options:
+%% Short version: "hyperref" and "submission" are the defaults.
+%% More verbose version:
+%% Most compact command to produce a submission version with hyperref enabled
+%%    \usepackage[]{tacl2021v1}
+%% Most compact command to produce a "camera-ready" version
+% \usepackage[acceptedWithA]{tacl2021v1}
+%% Most compact command to produce a double-spaced copy-editor's version
+%%    \usepackage[acceptedWithA,copyedit]{tacl2021v1}
+%
+%% If you need to disable hyperref in any of the above settings (see Section
+%% "LaTeX files") in the TACL instructions), add ",nohyperref" in the square
+%% brackets. (The comma is a delimiter in case there are multiple options specified.)
+
+% \usepackage{tacl2021v1}
+\usepackage[acceptedWithA]{tacl2021v1}
+% \usepackage[acceptedWithA,copyedit]{tacl2021v1}
+
+% \setlength\titlebox{10cm} % <- for Option 2 below
+
+%%%% Material in this block is specific to generating TACL instructions
+\usepackage{xspace,mfirstuc,tabulary}
+\newcommand{\dateOfLastUpdate}{Dec. 15, 2021}
+\newcommand{\styleFileVersion}{tacl2021v1}
+
+\newcommand{\ex}[1]{{\sf #1}}
+
+\newif\iftaclinstructions
+\taclinstructionsfalse % AUTHORS: do NOT set this to true
+\iftaclinstructions
+\renewcommand{\confidential}{}
+\renewcommand{\anonsubtext}{(No author info supplied here, for consistency with
+TACL-submission anonymization requirements)}
+\newcommand{\instr}
+\fi
+
+%
+\iftaclpubformat % this "if" is set by the choice of options
+\newcommand{\taclpaper}{final version\xspace}
+\newcommand{\taclpapers}{final versions\xspace}
+\newcommand{\Taclpaper}{Final version\xspace}
+\newcommand{\Taclpapers}{Final versions\xspace}
+\newcommand{\TaclPapers}{Final Versions\xspace}
+\else
+\newcommand{\taclpaper}{submission\xspace}
+\newcommand{\taclpapers}{{\taclpaper}s\xspace}
+\newcommand{\Taclpaper}{Submission\xspace}
+\newcommand{\Taclpapers}{{\Taclpaper}s\xspace}
+\newcommand{\TaclPapers}{Submissions\xspace}
+\fi
+
+%%%% End TACL-instructions-specific macro block
+%%%%
+
+\title{A Survey on Model Compression for Large Language Models}
+
+% Author information does not appear in the pdf unless the "acceptedWithA" option is given
+
+% The author block may be formatted in one of two ways:
+
+% Option 1. Author’s address is underneath each name, centered.
+
+% \author{
+%   Template Author1\Thanks{The {\em actual} contributors to this instruction
+%     document and corresponding template file are given in Section
+%     \ref{sec:contributors}.} 
+%   \\
+%   Template Affiliation1/Address Line 1
+%   \\
+%   Template Affiliation1/Address Line 2
+%   \\
+%   Template Affiliation1/Address Line 2
+%   \\
+%   \texttt{template.email1example.com}
+%   \And
+%   Template Author2 
+%   \\
+%   Template Affiliation2/Address Line 1
+%   \\
+%   Template Affiliation2/Address Line 2
+%   \\
+%   Template Affiliation2/Address Line 2
+%   \\
+%   \texttt{template.email2@example.com}
+% }
+
+% % Option 2.  Author’s address is linked with superscript
+% % characters to its name, author names are grouped, centered.
+
+% \author{
+%   Template Author1\Thanks{The {\em actual} contributors to this instruction
+%     document and corresponding template file are given in Section
+%     \ref{sec:contributors}.}$^\diamond$ 
+%   \and
+%   Template Author2$^\dagger$
+%   \\
+%   \ \\
+%   $^\diamond$Template Affiliation1/Address Line 1
+%   \\
+%   Template Affiliation1/Address Line 2
+%   \\
+%   Template Affiliation1/Address Line 2
+%   \\
+%   \texttt{template.email1example.com}
+%   \\
+%   \ \\
+%   \\
+%   $^\dagger$Template Affiliation2/Address Line 1
+%   \\
+%   Template Affiliation2/Address Line 2
+%   \\
+%   Template Affiliation2/Address Line 2
+%   \\
+%   \texttt{template.email2@example.com}
+% }
+\author{Xunyu Zhu$^{1,2}$, Jian Li$^{1,2}$\thanks{Corresponding author}, Yong Liu$^{3}$, Can Ma$^{1,2}$, Weiping Wang$^{1,2}$\\
+$^1$Institute of Information Engineering, Chinese Academy of Sciences\\
+$^2$School of Cyber Security, University of Chinese Academy of Sciences\\
+$^3$Gaoling School of Artificial Intelligence, Renmin University of China\\
+\texttt{\{zhuxunyu, lijian9026, macan, wangweiping\}@iie.ac.cn,
+liuyonggsai@ruc.edu.cn}\\
+}
+\date{}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+  Large Language Models (LLMs) have transformed natural language processing tasks successfully. Yet, their large size and high computational needs pose challenges for practical use, especially in resource-limited settings. Model compression has emerged as a key research area to address these challenges. This paper presents a survey of model compression techniques for LLMs. We cover methods like quantization, pruning, and knowledge distillation, highlighting recent advancements. We also discuss benchmarking strategies and evaluation metrics crucial for assessing compressed LLMs. This survey offers valuable insights for researchers and practitioners, aiming to enhance efficiency and real-world applicability of LLMs while laying a foundation for future advancements.	
+\end{abstract}
+
+
+\tikzstyle{my-box}=[
+ rectangle,
+ draw=hidden-draw,
+ rounded corners,
+ text opacity=1,
+ minimum height=1.5em,
+ minimum width=5em,
+ inner sep=2pt,
+ align=center,
+ fill opacity=.5,
+ ]
+ \tikzstyle{leaf}=[my-box, minimum height=1.5em,
+ fill=hidden-orange!60, text=black, align=left,font=\scriptsize,
+ inner xsep=2pt,
+ inner ysep=4pt,
+ ]
+ \begin{figure*}[!ht]
+	\centering
+	\resizebox{\textwidth}{!}{
+		\begin{forest}
+			forked edges,
+			for tree={
+				grow=east,
+				reversed=true,
+				anchor=base west,
+				parent anchor=east,
+				child anchor=west,
+				base=left,
+				font=\small,
+				rectangle,
+				draw=hidden-draw,
+				rounded corners,
+				align=left,
+				minimum width=4em,
+				edge+={darkgray, line width=1pt},
+				s sep=3pt,
+				inner xsep=2pt,
+				inner ysep=3pt,
+				ver/.style={rotate=90, child anchor=north, parent anchor=south, anchor=center},
+			},
+			where level=1{text width=5.3em,font=\scriptsize}{},
+			where level=2{text width=6.3em,font=\scriptsize}{},
+			where level=3{text width=6.6em,font=\scriptsize}{},
+            where level=4{text width=6.6em,font=\scriptsize}{},
+			[
+			Model Compression for Large Language Models, ver
+            [
+			Quantization ($\S$\ref{sec:quantization})
+			[
+			Quantization-Aware \\ Training ($\S$\ref{sec:qat})
+			[
+			LLM-QAT~\cite{abs-2305-17888}{,}
+            BitDistiller~\cite{abs-2402-10631}{,}
+            OneBit~\cite{abs-2402-11295}
+			, leaf, text width=41.3em
+			]
+			]
+			[
+			Post-Training \\ Quantization ($\S$\ref{sec:ptq})
+			[
+			Weight-Only \\ Quantization
+            ($\S$\ref{sec:weight-only-quantization})
+			[
+			LUT-GEMM~\cite{park2024lutgemm}{,}
+            GPTQ~\cite{frantar2023optq}{,}
+            QuIP~\cite{chee2023quip}{,}\\
+			AWQ~\cite{abs-2306-00978}{,}
+            OWQ~\cite{LeeJKKP24}{,} 
+			SpQR~\cite{dettmers2024spqr}{,}\\
+            SqueezeLLM~\cite{abs-2306-07629} 
+			, leaf, text width=33em
+			]
+			]
+			[
+			Weight-Activation \\ Quantization
+            ($\S$\ref{sec:weight-activation-quantization})
+			[
+            ZeroQuant~\cite{YaoAZWLH22}{,}
+			LLM.int8()~\cite{DettmersLBZ22}{,}  
+			SmoothQuant~\cite{XiaoLSWDH23}{,}\\
+			RPTQ~\cite{abs-2304-01089}{,}
+			OliVe~\cite{0003THL00LG023}{,} 
+			OS+~\cite{wei-etal-2023-outlier}{,}
+            LLM-FP4~\cite{liu-etal-2023-llm}{,}\\
+            OmniQuant~\cite{shao2024omniquant}
+			, leaf, text width=33em
+			]
+			]
+            [
+            KV Cache \\ Quantization ($\S$\ref{sec:kvcq})
+            [
+            KVQuant~\cite{abs-2401-18079}{,}
+            KIVI~\cite{abs-2402-02750}{,}
+            WKVQuant~\cite{abs-2402-12065}
+            , leaf, text width=33em
+            ]
+            ]
+			]
+			]
+			[
+			Pruning ($\S$\ref{sec:pruning})
+			[
+			Unstructured  Pruning 	\\($\S$\ref{sec:unstructured-pruning})	
+			[
+			SparseGPT~\cite{FrantarA23}{,}
+			Wanda~\cite{sun2024a}{,}
+            SAMSP~\cite{10445737}{,}
+            DSnoT~\cite{zhang2024dynamic}{,}\\
+            Flash-LLM~\cite{10.14778/3626292.3626303}
+			, leaf, text width=41em
+			]
+			]
+			[
+			Structured  Pruning \\($\S$\ref{sec:structured-pruning})
+			[
+			LLM-Pruner~\cite{ma2023llmpruner}{,} 
+            Shortened LLaMA~\cite{kim2024mefomo}{,}
+            FLAP~\cite{AnZYTW24}{,}
+            SliceGPT~\cite{ashkboos2024slicegpt}{,}\\
+            Sheared LLaMA~\cite{xia2024sheared}
+			, leaf, text width=41em
+			]
+			]
+            [
+            Semi-structured  \\Pruning
+            ($\S$\ref{sec:semi-structured-pruning})
+            [
+            E-Sparse~\cite{abs-2310-15929}{,}
+            SparseGPT~\cite{FrantarA23}{,}
+			Wanda~\cite{sun2024a}            
+            , leaf, text width=41em
+            ]
+            ]
+			]
+			[
+			Knowledge \\ Distillation
+            ($\S$\ref{sec:kd})
+			[
+			Black-box KD ($\S$\ref{sec:black-box-kd})
+            [
+			Chain-of-Thought \\ ($\S$\ref{sec:CoTD})
+			[
+			MT-COT~\cite{li2024explanations}{,}
+            CoT Prompting~\cite{MagisterMAMS23}{,} 
+			Fine-tune-CoT~\cite{HoSY23}{,} \\
+            SSLM~\cite{pmlr-v202-fu23d}{,} 
+			SCOTT~\cite{WangWLGYR23}{,} 
+            Distilling Step-by-Step~\cite{HsiehLYNFRKLP23}{,} \\
+			SOCRATIC CoT~\cite{ShridharSS23}{,} 
+            PaD~\cite{abs-2305-13888}{,}
+            DRA~\cite{WangHLWSZHWDSZ23}{,}\\
+            TDIG~\cite{LiYFPSWW024}
+			, leaf, text width=33em
+			]
+			]
+            [
+			In-Context Learning \\($\S$\ref{sec:ICLD})
+			[
+			In-context Learning Distillation~\cite{abs-2212-10670}{,}
+            AICD~\cite{liu2024learning}
+			, leaf, text width=33em
+			]               
+			]
+            [
+			Instruction Following \\($\S$\ref{sec:IFD})
+			[
+			Lion~\cite{jiang-etal-2023-lion}{,}
+            LaMini-LM~\cite{wu-etal-2024-lamini}{,}
+            SELF-INSTRUCT~\cite{wang-etal-2023-self-instruct}{,}\\
+            Selective Reflection-Tuning~\cite{abs-2402-10110}
+			, leaf, text width=33em
+			]
+			]
+			]
+            [
+			White-box KD ($\S$\ref{sec:white-box-kd})
+			[
+			MINILLM~\cite{gu2024minillm}{,} 
+			GKD~\cite{agarwal2024generalized}{,}
+            TED~\cite{LiangZZHCZ23}
+			, leaf, text width=41.2em
+			]
+			]
+			]
+            [
+            Low-Rank \\Factorization ($\S$\ref{sec:lrf})
+            [
+            LPLR~\cite{SahaSP23}{,}
+            ASVD~\cite{abs-2312-05821}{,}
+            LSAER~\cite{sharma2024the}
+            , leaf, text width=49.1em
+            ]
+            ]
+			]
+		\end{forest}
+	}
+	\caption{Taxonomy of Model Compression methods for Large Language Models.}
+	\label{categorization_of_LLMs}
+\end{figure*}
+
+
+
+\section{Introduction}
+Large Language Models (LLMs)~\cite{abs-2302-13971,abs-2307-09288,abs-2205-01068,abs-2211-05100,gpt-j,openai2024gpt4} refer to Transformer language models that contain billions (or more) of parameters, which are trained on massive text data. LLMs consistently exhibit remarkable performance across various tasks, but their exceptional capabilities come with significant challenges stemming from their extensive size and computational requirements. For instance, the GPT-175B model~\cite{BrownMRSKDNSSAA20}, with an impressive 175 billion parameters, demands a minimum of 350GB of memory in half-precision (FP16) format. Furthermore, deploying this model for inference necessitates at least five A100 GPUs, each featuring 80GB of memory, to efficiently manage operations. To tackle these issues, a prevalent approach known as model compression~\cite{HanMD15} offers a solution. Model compression involves transforming a large, resource-intensive model into a compact version suitable for deployment on resource-constrained devices. Additionally, model compression can enhance LLM inference speed and optimizes resource efficiency.
+
+% Apart from their technical aspects, LLMs have triggered discussions on environmental and ethical matters. These models pose significant challenges for engineers and researchers in developing nations, where limited resources can impede access to essential hardware for model execution~\cite{abs-2306-00978}. Additionally, the substantial energy consumption of LLMs contributes to carbon emissions, underscoring the significance of sustainable practices in AI research. A promising solution to these challenges lies in utilizing model compression techniques, which have showcased the potential to reduce emissions without substantially compromising performance~\cite{abs-2211-02001}. By implementing model compression, we can tackle environmental concerns, enhance accessibility, and promote inclusivity in LLM deployment.
+
+In our paper, our primary objective is to illuminate the recent strides made in the domain of model compression techniques tailored specifically for LLMs. Our work conducts an exhaustive survey of methodologies, metrics, and benchmarks of model compression for LLMs. Figure~\ref{categorization_of_LLMs} shows the taxonomy of model compression methods for LLMs,  including quantization, pruning, knowledge distillation, and low-rank factorization. Figure~\ref{fig:model_compression_method} further shows basic flow of these  model compression methods for LLMs. Furthermore, our study sheds light on prevailing challenges and offers a glimpse into potential future research trajectories in this evolving field. We advocate for collaborative efforts within the community to pave the way for an ecologically conscious, all-encompassing, and sustainable future for LLMs. While there were previous surveys on neural networks model compression~\cite{LiLM23} and it has been lightly discussed in prior surveys on LMs~\cite{rogers-etal-2020-primer} and LLMs~\cite{abs-2303-18223}, our work is the inaugural survey dedicated solely to model compression for LLMs.
+
+
+\begin{figure*}[]
+    \centering
+    \includegraphics[width=\textwidth]{model_compression.pdf}
+    \caption{Illustrations of model compression methods for LLMs. In these methods, Quantization-Aware Training (QAT) and Knowledge Distillation (KD) stand out as task-based model compression techniques, tailored for specific tasks. Conversely, other model compression methods are task-agnostic, designed to operate independently of specific tasks. }
+    \label{fig:model_compression_method}
+\end{figure*}
+
+
+\section{Metrics and Benchmarks}
+\subsection{Metrics}
+Model compression of LLMs can be measured using various metrics, which capture different aspects of performance. These metrics are commonly presented alongside accuracy and zero-shot ability to comprehensively evaluate the LLM.
+ 
+\textbf{Model Size} in a LLM typically  is measured by the number of total parameters of the LLM.  In general, LLMs with more parameters often requires more computational resources and memory for both training and inference.
+
+
+\textbf{Floating Point Operations (FLOPs)} is an indicator that measures the  computational efficiency of LLMs, representing the number of floating-point operations required for the LLM to perform an instance.  In model compression, reducing FLOPs helps to make the LLM run faster and more efficiently. 
+
+\textbf{Mean FLOPS Utilization (MFU)} quantifies the practical efficiency of computational resource utilization by LLMs during tasks.  MFU measures the ratio of actual FLOPS utilized by the LLM to the maximum theoretical FLOPS of a device. Unlike FLOPs, which estimates the maximum operations an LLM might perform, MFU assesses the actual effectiveness of resource use in operation. Essentially, while FLOPs measures a LLM's theoretical compute needs, MFU shows how effectively these computations are utilized in practice.
+
+ 
+\textbf{Inference time} (i.e., latency) measures the time taken by the LLM to process and generate responses for input data during inference. Inference time is particularly crucial for real-world applications where the LLM needs to respond for user queries or process large amounts of data in real-time.
+ 
+\textbf{Speedup Ratio} measures how much faster a compressed LLM performs tasks compared to the original LLM.  Specifically, it measures the ratio of the inference time of the uncompressed model over the inference time of the compressed model. Higher ratios mean greater efficiency and reduced computation time, highlighting effective compression. 
+
+\textbf{Compression Ratio} measures how much a LLM's size is reduced through compression, calculated as the original size divided by the compressed size. Higher ratios mean greater size reduction, showing the compression's effectiveness in saving storage and memory.
+
+
+
+% \textcolor{red}{\textbf{Arithmetic Intensity} is a key metric that measures the computational density of a LLM by comparing the volume of FLOPs it performs against the amount of memory access required. It shows the balance between computing and memory access. A higher value indicates that the LLM is more computation-bound. }
+
+% \textcolor{red}{\textbf{Memory Size} quantifies the total amount of memory required to deploy a LLM.  This metric is crucial for evaluating the effectiveness of compression techniques, as it directly impacts a LLM's deployability on devices with limited memory capacity.}
+
+% \textcolor{red}{\textbf{Throughput} is a efficiency indicator that measures the maximum amount of output tokens or tasks that a LLM can process per second. A LLM with high throughput can process more data in a short time, thus meeting the needs for response speed and processing capacity in practical applications.}
+
+
+% \textcolor{red}{\textbf{Memory Bandwidth}  plays a critical role by assessing the rate at which data can be read from or written to memory during model inference.  This metric is essential for understanding how swiftly a compressed LLM can access its memory information, affecting overall performance, especially in real-time applications. Optimizing for Memory Bandwidth ensures that LLMs  achieve higher efficiency and speed, making them more suitable for deployment on devices with limited memory bandwidth capabilities.}
+
+% \begin{remark}
+%     \textcolor{red}{The model size concerns GPU memory, FLOPs represent model computational workload, and a higher FLOPs value indicates larger model complexity. Inference time focuses on the user experience, aiming for faster result generation. These metrics generally interact with each other and impact accuracy, thus requiring a balance. For example, when pruning is applied to LLMs~\cite{FrantarA23}, the model's size, FLOPs, and inference time decrease, but the model's accuracy may also decrease. The primary goal of Large Language Model (LLM) compression is to minimize model size, FLOPs, and inference time while attempting to maintain accuracy as much as possible. For straightforward tasks, smaller compressed models suffice with minimal performance impact. However, for intricate tasks, larger compressed models are necessary for optimal performance. Hence, developing algorithms to dynamically adjust compressed model sizes based on task complexity is crucial for striking a balance between size and performance.}
+% \end{remark}
+
+\subsection{Benchmarks and Datasets} 
+ The main goal of these benchmarks and datasets is to measure the efficiency and performance of compressed LLMs in comparison to their uncompressed counterparts. These benchmarks and datasets typically consist of diverse tasks and datasets that cover a range of natural language processing challenges. 
+ 
+ \subsubsection{Common Benchmarks and Datasets}
+ The majority of research evaluates compressed LLMs on well-established NLP benchmarks and datasets. For instance, WikiText-2~\cite{MerityX0S17}, C4~\cite{RaffelSRLNMZLL20}, and PTB~\cite{10.5555/972470.972475}  are designed for evaluating the perplexity performance of language models. LAMBADA~\cite{PapernoKLPBPBBF16}, PIQA~\cite{TataP03}, and OpenBookQA~\cite{MihaylovCKS18} are designed to evaluate the zero-shot ability of language models. GSM8K~\cite{abs-2110-14168}, CommonsenseQA~\cite{talmor-etal-2019-commonsenseqa} and StrategyQA~\cite{GevaKSKRB21} are designed to evaluate the reasoning  ability of language models.
+
+
+
+\subsubsection{BIG-Bench}
+BIG-Bench (BBH)~\cite{srivastava2023beyond}  is a benchmark suite designed for LLMs, covering over 200 NLP tasks, e.g., Text Comprehension Tasks, Inference Tasks, Mathematical Reasoning Tasks. The aim of BBH is to evaluate the performance of LLMs across these various complex tasks.  The compressed LLMs use BBH to measure their capability across a multidimensional spectrum of tasks. 
+
+\subsubsection{Unseen Instructions Datasets}
+Unseen instructions datasets are used to evaluate the performance of LLMs on unseen tasks. For instance, the Vicuna-Instructions~\cite{vicuna2023} dataset created by GPT-4 includes 80 complex questions across nine different categories like generic, knowledge-based, and writing tasks. Another dataset, User-Oriented-Instructions~\cite{WangKMLSKH23}, consists of 252 carefully selected instructions inspired by various user-focused applications such as Grammarly, StackOverflow, and Overleaf. These datasets evaluate how well compact LLMs can handle and carry out new tasks by presenting them with unfamiliar instructions.
+
+\subsubsection{EleutherAI LM Harness} 
+The EleutherAI LM Harness~\cite{eval-harness}  is an advanced framework for evaluating LLMs, providing a unified testing platform that supports over 60 standard academic benchmarks along with hundreds of subtasks and variants. The standardized evaluation tasks provided by the harness ensure the reproducibility and comparability of evaluation, which is essential for implementing fair and reproducible evaluations for the compressed LLMs.
+
+ % This is very important because assessing the efficiency at which LLMs deploy onto specific hardware help researchers to understand why model compression can reduce memory requirements and accelerate models, and design appropriate model compression strategies to reduce memory requirements and accelerate models based on hardware, task and model characteristics. 
+ 
+% \textcolor{red}{\subsubsection{Roofline Model} 
+% The Roofline Model~\cite{WilliamsWP09}  serves as an analytical tool for assessing the resource efficiency of compressed LLMs on specific hardware. It gauges the LLM's performance potential by determining  the peak compute performance and peak memory bandwidth of the target hardware. The Roofline Model distinguishes between whether an LLM is constrained by computation or memory by plotting two crucial lines: one depicting the hardware's peak computational performance and the other its peak memory bandwidth. The point where these lines intersect is termed the turning point. If the arithmetic intensity of the LLM falls below the arithmetic intensity at the turning point, it is memory-bound; otherwise, it is compute-bound.}
+
+% \textcolor{red}{~\citet{abs-2303-18223} highlights that the resource efficiency of LLMs is also influenced by the decoding process, sequence length, and batch size. Specifically, the decoding process comprises two distinct stages~\cite{0007ZYLRCLRSZ23}: prefilling and incremental decoding. During the prefill stage, the hidden states of the input sequence are computed, while the incremental decoding stage involves token generation and auto-regressive updates to hidden states.   The incremental decoding stage typically exhibits lower arithmetic intensity compared to the prefill stage~\cite{abs-2303-18223}.  Furthermore,  increasing the input sequence length can escalate the arithmetic intensity and memory access demands of LLMs, while boosting batch size can enhance the throughput of attention layers and the computational efficiency of dense layers~\cite{abcdabcd987}. Consequently, evaluating the resource efficiency of compressed LLMs on specific hardware requires a holistic consideration of hardware specifications, task settings, and model characteristics. By comprehensively analyzing these factors, researchers can grasp why model compression accelerates the inference process of LLMs. Moreover, this understanding enables the development of more advanced model compression techniques tailored to accelerate LLM inference further.}
+
+% For example, these benchmarks and datasets lack robustness evaluation and trustworthiness assessment, critical for ensuring optimal performance in real-world scenarios where compressed LLMs are widely integrated. Additionally, benchmark development should go beyond just application coverage to address essential aspects such as value alignment, safety, verification, and interdisciplinary research. For example, Auto-J~\cite{abs-2310-05470} serves as an automatic evaluation benchmark, facilitating LLM alignment through an open-source evaluation model, allowing for automated assessment of generality, flexibility, and interpretability. As research advances, we expect the emergence of more comprehensive benchmarks to support model compression endeavors.
+
+% \begin{remark}
+%     \textcolor{red}{These various benchmarks and dataset evaluate the  performance of compressed LLMs from different perspectives, yet there's a lack of a unified benchmark specifically for evaluating the resource efficiency of compressed LLMs. }
+% \end{remark}
+
+\begin{table*}[]
+\centering
+\caption{The performance of various representative LLM quantization methods. }
+\label{tab:quantization}
+\resizebox{\textwidth}{!}{%
+\begin{threeparttable}
+\begin{tabular}{@{}ccccccccc@{}}
+\toprule
+\multirow{2}{*}{\textbf{Category}\tnote{$\dagger$}} & \multirow{2}{*}{\textbf{Methods}} & \multirow{2}{*}{\textbf{LLM}} & \multicolumn{3}{c}{\textbf{Bit Width}} & \multicolumn{2}{c}{\textbf{Perplexity Difference}\tnote{$\ddagger$}} & \multirow{2}{*}{\textbf{Speedup}} \\ \cmidrule(lr){4-8}
+ &  &  & \textbf{Weights} & \textbf{Activations} & \textbf{KV Cache} & \textbf{Wikitext-2} & \textbf{C4} &  \\ \midrule
+\multirow{3}{*}{QAT} & LLM-QAT & LLaMA-30B & 4 & 8 & 16 & 0.5 & 0.9 & - \\
+ & BitDistiller & LLaMA2-13B & 2 & 16 & 16 & 1.9 & - & - \\
+ & OneBit & LLaMA-13B & 1 & 16 & 16 & 4.09 & 3.64 & - \\ \midrule
+\multirow{7}{*}{Weight-Only Quantization} & LUT-GEMM & LLaMA-65B & 3 & 16 & 16 & 0.14 & - & 2.04$\times$ \\
+ & SqueezeLLM & LLaMA-13B & 3 & 16 & 16 & 0.51 & 0.67 & 2.4$\times$ \\
+ & GPTQ & OPT-175B & 3 & 16 & 16 & 0.34 & 0.23 & 3.24$\times$ \\
+ & AWQ & LLaMA2-70B & 3 & 16 & 16 & 0.42 & - & 3.2$\times$ \\
+ & OWQ & LLaMA-65B & 3.01 & 16 & 16 & 0.72 & - & - \\
+ & SpQR & LLaMA-30B & 3.89 & 16 & 16 & 0.15 & 0.1 & 2.0$\times$ \\
+ & QuIP & LLaMA2-70B & 2 & 16 & 16 & 3.007 & 3.228 & - \\ \midrule
+\multirow{9}{*}{Weight-Activation Quantization} & ZeroQuant & GPT-J-6B & 8 & 8 & 16 & 0.16 & - & 3.67$\times$ \\
+ & LLM.int8() & OPT-13B & 8 & 8 & 16 & - & 0.00 & 1.22$\times$ \\
+ & SmoothQuant & OPT-175B & 8 & 8 & 16 & 0.18 & - & 1.56$\times$ \\
+ & RPTQ & OPT-175b & 4 & 4 & 16 & 2.26 & 2.15 & - \\
+ & Olive & BLOOM-7B & 4 & 4 & 16 & 2.11 & 2.24 & 4.5$\times$ \\
+ & OS+ & LLaMA-65B & 4 & 4 & 16 & 5.77 & - & - \\
+ & QT & OPT-1.3B & 8 & 8 & 16 & 17.74 & - & - \\
+ & ZeroQuant-FP & LLaMA-30B & 4 & 8 & 16 & 0.18 & 0.13 & - \\
+ & OmniQuant & LLaMA-7B & 4 & 6 & 16 & 0.41 & 0.55 & - \\ \midrule
+\multirow{2}{*}{KV Cache Quantization} & KVQuant & LLaMA-65B & 16 & 16 & 2 & 0.19 & 0.11 & 1.4$\times$ \\
+ & WKVQuant & LLaMA-13B & 4 & 16 & 4 & 0.12 & 0.14 & - \\ \bottomrule
+\end{tabular}
+\begin{tablenotes} 
+\item[$\dagger$]: The results presented in the table are solely derived from the original papers.
+\item[$\ddagger$]: (The perplexity of the quantized LLM) - (The perplexity of the origin LLM).
+\end{tablenotes}  
+\end{threeparttable}
+}
+\end{table*}
+
+\section{Quantization}
+\label{sec:quantization}
+Quantization~\cite{720541} refers to the process of reducing the number of bits (i.e., precision) in the parameters of the model with minimal loss in inference performance. Quantization can be categorized into two main approaches: \textbf{Quantization-Aware Training (QAT)}, and \textbf{Post-Training Quantization (PTQ)}. The primary distinction between the two approaches lies in whether retraining is needed during quantization. PTQ enables direct use of quantized models in inference, while QAT requires retraining to rectify errors introduced by quantization. Table~\ref{tab:quantization} shows the performance of many representative LLM quantization methods.
+
+ 
+
+\subsection{Quantization-Aware Training}
+\label{sec:qat}
+QAT involves retraining a quantized model to counteract performance degradation caused by quantization.  For instance, LLM-QAT~\cite{abs-2305-17888} implements the standard QAT framework directly onto LLMs.  LLM-QAT distills knowledge by generating data from the LLM itself, and train the quantized LLM to align with the output distribution of the original LLM based on the generated data.   BitDistiller~\cite{abs-2402-10631} merges QAT with self-distillation, enhancing LLM performance at sub-4-bit precisions. It employs tailored asymmetric quantization, clipping, and a Confidence-Aware Kullback-Leibler Divergence objective for faster convergence and superior results.  OneBit~\cite{abs-2402-11295} introduces a novel 1-bit parameter representation method and an effective parameter initialization method to implement 1-bit quantization for LLM weight matrices, paving the way for the extremely low bit-width deployment of LLMs. 
+
+\begin{remark}
+While QAT can mitigate quantization's accuracy degradation, retraining demands  a lot of effort due to tens or hundreds of billions of parameters in LLMs. A practical solution is to incorporate Parameter-Efficient Fine-Tuning (PEFT) into the retraining process of QAT. Currently, methods like QLORA~\cite{DettmersPHZ23}, PEQA~\cite{abs-2305-14152} and LoftQ~\cite{abs-2310-08659} combine quantization with PEFT for model fine-tuning efficiency. However, these methods are typically task-dependent. L4Q~\cite{abs-2402-04902} makes a preliminary attempt to enhance generality by leveraging LoRA-wise learned quantization step size for LLMs. We think that introducing PEFT to enhance QAT efficiency is not only feasible but also holds significant promise, warranting thorough exploration.
+\end{remark}
+  
+
+\subsection{Post-Training Quantization}
+\label{sec:ptq}
+ PTQ efficiently converts a full-precision LLM to low-precision without retraining, saving memory and computational costs. We categorize PTQ for LLMs into three groups: \textbf{Weight-Only Quantization}, \textbf{Weight-Activation Quantization}, and \textbf{KV Cache Quantization}. The disparity between these groups lies in their quantization objectives. Weight-only quantization focuses solely on quantizing weights, whereas weight-activation quantization extends its objective to both weights and activations.  Prior research~\cite{abs-2303-08302} indicates that activation quantization is typically more sensitive to weight quantization, allowing weight-only quantization to achieve lower bit-width. However, since quantized weights necessitate dequantization before multiplication with activations, weight-only quantization inevitably introduces additional computational overhead during inference and  cannot enjoy the accelerated low-bit operation supported by specific hardware. Furthermore,  kv cache quantization targets the KV cache, which stores keys and values of attention layers. The KV cache often consumes lots of memory, acting as a bottleneck for input streams containing lengthy tokens.  By implementing kv cache quantization, it is possible to increase throughput and accommodate inputs with longer tokens more efficiently.
+
+\subsubsection{Weight-Only Quantization}
+\label{sec:weight-only-quantization}
+Weight-only quantization is the most conventional and widespread method. For example, LUT-GEMM~\cite{park2024lutgemm} uses binary-coding quantization (BCQ)~\cite{RastegariORF16} format, which factorizes the parameters of LLMs into binary parameters and a set of scaling factors, to accelerate quantized matrix multiplications in weight-only quantization. GPTQ~\cite{frantar2023optq} proposes a layer-wise quantization method based on Optimal Brain Quantization (OBQ)~\cite{frantar2022optimal}, which updates weights with inverse Hessian information, and quantizes LLMs into 3/4-bit. QuIP~\cite{chee2023quip}  optimally adjusts weights by utilizing the LDL decomposition of the Hessian matrix derived from vectors drawn uniformly at random from a calibration set, and multiplies weight and Hessian matrices with a Kronecker product of random orthogonal matrices to ensure incoherence between weight and Hessian matrices. Combining these two steps, QuIP successfully quantizes LLMs into 2-bits with minimal performance loss.
+
+To further minimize quantization errors in the weight-only quantization of LLMs, lots of works identify sensitive weights, which have an important effect on LLMs' quantization performance, and store these sensitive weights in high precision. For example, AWQ~\cite{abs-2306-00978} stores the top 1\% of weights that have the most significant impact on LLM performance in high-precision, and integrates a per-channel scaling method to identify optimal scaling factors. Here, "channel" denotes individual dimensions or feature maps within the model. Similar with AWQ, OWQ~\cite{LeeJKKP24} store weights sensitive to activation outliers in high-precision, and quantizes other non-sensitive weights.  Different from OWQ, SpQR~\cite{dettmers2024spqr} employs the L2 error between the original and quantized predictions as a weight sensitivity metric.  Furthermore, SqueezeLLM~\cite{abs-2306-07629} introduces a  weights clusters algorithm  based on sensitivity, using k-means centroids as quantized weight values, to identify sensitive weights. The sensitivity is approximated by the Hessian matrix of weights.  Then, SqueezeLLM stores sensitive weights in an efficient sparse format, and quantize other weights. SqueezeLLM quantizes LLMs in 3-bit, and achieves a more than 2× speedup compared to the FP16 baseline.
+
+
+
+\subsubsection{Weight-Activation Quantization} 
+\label{sec:weight-activation-quantization}
+Alongside works centered on weight-only quantization in LLMs, there is a plethora of research focusing primarily on weight-activation quantization in LLMs. For example, ZeroQuant~\cite{YaoAZWLH22} is the first work to implement weight-activation quantization for LLMs, which uses group-wise quantization for weight and token-wise quantization for activations, and  reduces the precision for weights and activations of LLMs to INT8. 
+
+LLMs have outliers in activations, and the performance of LLMs declines a lot, if these activations with outliers are directly quantized. Recent works try to treat these outliers specially to reduce quantization errors in weight-activation quantization. For example, LLM.int8()~\cite{DettmersLBZ22} stores these outlier feature dimensions into high-precision, and uses vector-wise quantization, which assigns separate normalization constants to each inner product within matrix multiplication, to quantize other features. LLM.int8() quantizes weights and activations of LLMs into 8-bit without any performance degradation. SmoothQuant~\cite{XiaoLSWDH23} designs a per-channel scaling transformation to smooths the activation outliers based on the discovery that different tokens have similar variations across channels of activations. RPTQ~\cite{abs-2304-01089} finds that the range of values varies greatly between different channels, and integrates a channel reordering method, which clusters and reorders the channels in the activation and uses the same quantization parameters to quantize the values in each cluster, into layer normalization and linear layer weights to efficiently reduce the effect of numerical range differences between channels. OliVe~\cite{0003THL00LG023} thinks that outliers are more important than the normal values, and uses an outlier-victim pair
+(OVP) quantization to handle outlier values locally with low hardware overheads and
+significant performance benefits. OS+~\cite{wei-etal-2023-outlier} further finds that outliers are concentrated in specific and asymmetric channels. Based on the findings, OS+ incorporates channel-wise shifting to eliminate the impact of asymmetry and channel-wise scaling to balance the distribution of outliers. LLM-FP4~\cite{liu-etal-2023-llm} uses floating-point formats (specifically FP8 and FP4) to address the limitations of traditional integer quantization (such as INT8 and INT4) to deal with outliers. Furthermore, LLM-FP4~\cite{liu-etal-2023-llm} points out that exponent bits and clipping range are important factors that effect the performance of FP quantization, and introduces a search-based framework for determining the optimal exponent bias and maximal quantization value. OmniQuant~\cite{shao2024omniquant} handles the activation outliers by equivalently shifting the challenge of quantization from activations to weights, and optimizes the clipping threshold to adjust the extreme values of the weights.
+
+\subsubsection{KV Cache Quantization}
+\label{sec:kvcq}
+With the increasing number of input tokens supported by LLMs, the memory usage of the KV cache also increases. Recent efforts begin to focus on kv cache quantization to reduce the memory footprint of LLMs and accelerate their inference. For example, KVQuant~\cite{abs-2401-18079} proposes several KV Cache
+Quantization methods, such as Per-Channel Key Quantization, PreRoPE Key Quantization, and Non-Uniform kv cache quantization, to implement
+10 million context length LLM inference.   Through an in-depth analysis of the element distribution within the KV cache, KIVI~\cite{abs-2402-02750} finds that key caches should be quantized per-channel, while value caches should be quantized per-token. Finally, KIVI succeeds in quantizing the KV cache to 2 bits without fine-tuning.  WKVQuant~\cite{abs-2402-12065} presents an innovative approach for quantizing large language models (LLMs) by integrating past-only quantization to refine attention computations, employing a two-dimensional quantization strategy to manage the distribution of key/value (KV) caches effectively, and utilizing cross-block reconstruction regularization for optimizing parameters. This method enables the quantization of both weights and KV caches, resulting in memory savings that rival those of weight-activation quantization, while nearly matching the performance levels of weight-only quantization. 
+
+
+
+% \begin{remark}
+%      \textcolor{red}{For PTQ, preparing a high-quality calibration dataset to assist in determining the right quantization weights and scaling factors is crucial. Specifically, ~\citet{abs-2311-09755} make a extensive empirical study on the effect of calibration data upon  model compression methods, and  find that the performance of downstream tasks can vary significantly depending on the calibration data selected. High-quality calibration data can improve the performance and accuracy of the quantized model, so careful selection and preparation of calibration data are necessary.}
+% \end{remark}
+
+\begin{table*}[]  
+\centering  
+\scriptsize  
+\begin{threeparttable} 
+\caption{The performance of various representative LLM pruning methods.} 
+\label{tab:pruning} 
+\begin{tabular}{@{}cccccc@{}}  
+\toprule  
+\multirow{2}{*}{\textbf{Category}\tnote{$\dagger$}} & \multirow{2}{*}{\textbf{Methods}} & \multirow{2}{*}{\textbf{LLM}} & \multirow{2}{*}{\begin{tabular}[c]{@{}c@{}}\textbf{Perplexity Difference}\\ \textbf{(WikiText-2)}\tnote{$\ddagger$}\end{tabular}} & \multirow{2}{*}{\textbf{Compression Rate}} & \multirow{2}{*}{\textbf{Speed up}} \\ 
+ &  &  &&  &  \\ \midrule  
+\multirow{4}{*}{Unstructured Pruning} & SparseGPT & OPT-175B & -0.14 & 50\% & - \\  
+ & Wanda & LLaMA-65B & 1.01 & 50\% & - \\  
+ & SAMSP & LLaMA2-13B & 0.63 & 50\% & - \\  
+ & DSnoT & LLaMA-65B & 2.08e4 & 90\% & - \\ \midrule  
+\multirow{4}{*}{Structured Pruning} & LLM-Pruner & LLaMA-13B & 3.6 & 20\% & - \\  
+ & Shortened LLaMA & LLaMA-7B & 10.5 & 35\% & - \\  
+ & FLAP & LLaMA-65B & 7.09 & 50\% & - \\  
+ & SliceGPT & LLaMA2-70B & 1.73 & 30\% & 1.87$\times$ \\ \midrule  
+\multirow{3}{*}{Semi-Structured Pruning} & E-Sparse & LLaMA-65B & 2.13 & 2:4 & 1.53$\times$ \\  
+ & SparseGPT & OPT-175B & 0.39 & 2:4 & 2$\times$ \\  
+ & Wanda & LLaMA-65B & 2.69 & 2:4 & 1.24$\times$ \\ \bottomrule  
+\end{tabular}  
+\begin{tablenotes} 
+\item[$\dagger$]: The results presented in the table are solely derived from the original papers.
+\item[$\ddagger$]: (The perplexity of the pruned LLM) - (The perplexity of the origin LLM).
+\end{tablenotes}  
+\end{threeparttable}  
+\end{table*}  
+
+\section{Pruning}
+\label{sec:pruning}
+Pruning~\cite{CunDS89} is a powerful technique to reduce the size or complexity of a model by removing redundant components.   Pruning can be divided into \textbf{Unstructured Pruning}, \textbf{Semi-Structured Pruning}, and \textbf{Structured Pruning}. Structured pruning removes entire components like neurons, attention heads, or layers based on specific rules while preserving the overall network structure. On the other hand, unstructured pruning prunes individual parameters, resulting in an irregular sparse structure.  Semi-structured pruning is a method that lies between structured pruning and unstructured pruning, capable of achieving fine-grained pruning and structural regularization simultaneously. It prunes partial parameters based on specific patterns rather than entire channels, filters, or neurons, making it a fine-grained form of structured pruning. Table~\ref{tab:pruning} shows the performance of many representative LLM pruning methods. 
+
+
+\subsection{Unstructured Pruning}
+\label{sec:unstructured-pruning}
+Unstructured pruning preserves the pruned model's performance, hence, works related to unstructured pruning of LLMs often dispense with retraining to restore performance. Nevertheless, unstructured pruning renders the pruned model irregular, necessitating specialized handling or software optimizations for inference acceleration.
+An innovative approach in this domain is SparseGPT~\cite{FrantarA23}, which introduces a one-shot pruning strategy without retraining. SparseGPT frames pruning as an extensive sparse regression problem and solves it using an approximate sparse regression solver. SparseGPT achieves significant unstructured sparsity, even up to over 50\% on the largest GPT models like OPT-175B and BLOOM-176B, with minimal increase in perplexity. To reduce the cost about the weight update process required by SparseGPT, Wanda~\cite{sun2024a}  achieves model sparsity by pruning weights with the smallest magnitudes multiplied by the norm of  the corresponding input activations, without the need for retraining or weight updates. To further minimize pruning-induced errors while upholding the desired overall sparsity level, SAMSP~\cite{10445737} utilizes the Hessian matrix as a metric for weight matrix sensitivity evaluation, and dynamically adjusts sparsity allocation based on sensitivity. Furthermore, DSnoT~\cite{zhang2024dynamic} minimizes the reconstruction error between dense and sparse models through iterative weight pruning-and-growing on top of sparse LLMs to enhance LLM performance across various sparsity rates, especially at high sparsity levels. 
+To provide hardware support for handling unstructured  pruning on  the GPU Tensor Core hardware, Flash-LLM~\cite{10.14778/3626292.3626303} introduces an unstructured sparse matrix multiplication method, which loads weight matrices in a sparse format from global memory and reconstructs them in a dense format within high-speed on-chip buffers for computation using tensor cores. 
+
+ % \begin{remark}
+ %   \begin{enumerate}
+ %       \item \textcolor{red}{Choosing the optimal pruning strategy is crucial for maximizing performance and compatibility with the target hardware. For instance, SparseGPT utilizes the DeepSparse engine~\cite{deepsparse} to evaluate the OPT-2.7B model, demonstrating that unstructured pruning yields close-to-optimal acceleration on CPUs. Moreover, conducting a 2:4 sparsity test on various layers of the OPT-175B model with the CUTLASS library reveals notable speedups ranging from 54\% to 79\% on GPUs, underscoring the significant performance enhancement achievable with semi-structured pruning on GPU architectures.} 
+ %       \item \textcolor{red}{When language models are pruned, the performance of larger models declined less than that of their smaller counterparts. For example, by pruning OPT-175B with SparseGPT to achieve a 50\% sparsity, the model's perplexity decreased by 0.14\% compared to the original OPT-175B on raw-WikiText2. On the other hand, pruning OPT-2.7B with SparseGPT to achieve a 50\% sparsity resulted in a 1.01\% increase in perplexity compared to the original OPT-175B on raw-WikiText2. Thus, efficient pruning strategies are very important for large language models.}
+ %   \end{enumerate}
+ % \end{remark} 
+
+
+
+
+\subsection{Structured Pruning}
+\label{sec:structured-pruning}
+Compared to unstructured pruning, structured pruning offers the advantage of being hardware-agnostic, allowing for accelerated inference on traditional hardware post-pruning. However, the removal of larger and potentially more critical components in structured pruning may result in performance degradation, typically requiring efficient parameter fine-tuning for recovery. We divide LLMs structured pruning works  into several groups based on  pruning metrics: \textbf{Loss-based Pruning}, \textbf{Magnitude-based Pruning}, \textbf{Regularization-based Pruning}. 
+ 
+ \textbf{Loss-based Pruning}~\cite{MolchanovMTFK19} assesses the significance of a pruning unit by measuring its impact on loss or gradient information (e.g., first-order or second-order derivatives of loss). For example, LLM-Pruner~\cite{ma2023llmpruner} introduces a one-shot structured pruning on LLMs based on gradient information. Specifically, LLM-Pruner identifies dependent structures via a dependency detection algorithm and selects optimal pruning groups using gradient information, rather than solely relying on loss changes, in a task-agnostic manner.  Different from LLM-Pruner, which focuses on narrowing LLMs' width,  Shortened LLaMA~\cite{kim2024mefomo} introduces a one-shot depth pruning on LLMs. Shortened LLaMA chooses the Transformer block as the prunable unit, and prunes these unimportant Transformer blocks, where the importance of Transformer blocks is evaluated by loss and its second-order derivative. After Pruning, both LLM-Pruner and Shortened LLaMA utilize LoRA to rapidly recover the performance of the pruned model.
+ 
+
+\textbf{Magnitude-based Pruning}~\cite{NIPS2015_ae0eb3ee}  involves devising a heuristic metric based on the magnitudes of pruning units, and use the metric to assess the importance of pruning units, subsequently pruning those units whose scores fall below a predefined threshold. For example, FLAP~\cite{AnZYTW24} utilizes a structured fluctuation metric to assess and identify columns in the weight matrix suitable for pruning, measuring the variation of each input feature relative to a baseline value to estimate the impact of removing a column of weights. Additionally, FLAP  uses an adaptive structure search to optimize global model compression, and restores the model's performance post-pruning through a baseline bias compensation mechanism, avoiding the need for fine-tuning. To further maintain the pruned model's performance,  SliceGPT~\cite{ashkboos2024slicegpt} leverages the computational invariance of transformer networks and optimizes the pruning process through Principal Component Analysis (PCA). Specifically, SliceGPT employs PCA as the pruning metric, applying it at each layer of the transformer network to project the signal matrix onto its principal components and eliminate insignificant columns or rows from the transformed weight matrices, ultimately aiming to compress the model effectively.
+
+
+\textbf{Regularization-based Pruning}~\cite{NIPS2016_41bfd20a} typically adds a regularization term (e.g., $L_0$, $L_1$, and $L_2$ regularization) into the loss function to induce sparsity for LLMs. For example, Sheared LLaMA~\cite{xia2024sheared} uses a pair of Lagrange multipliers based on pruning masks to impose constraints on the pruned model shape directly, thereby formulating pruning as a constrained optimization problem.  Through solving this optimization problem, Sheared LLaMA derives optimal pruning masks. Additionally, Sheared LLaMA introduces dynamic batch loading, a strategy that adapts training data loading based on each domain's loss reduction rate, enhancing the efficiency of data utilization during training. 
+
+
+\begin{remark}
+   Structured pruning typically reduces model size by removing redundant parameters, but it may degrade model performance. A novel approach is to combine knowledge distillation~\cite{HintonVD15} with structured pruning. Knowledge distillation allows knowledge extracted from a LLM to be transferred to a smaller model, helping the smaller model maintain its performance while reducing its size.
+\end{remark}
+
+\subsection{Semi-Structured Pruning}
+\label{sec:semi-structured-pruning}
+Apart from unstructured pruning and structured pruning, there are many works which use semi-structured pruning to prune partial weights  of LLMs based on specific patterns. N:M sparsity, where every M contiguous elements leave N non-zero elements, is an example of semi-structured pruning. For example, E-Sparse~\cite{abs-2310-15929} implements N:M sparsity by introducing information entropy as a metric for evaluating parameter importance to enhances the significance of parameter weights and input feature norms. E-Sparse incorporates global naive shuffle and local block shuffle to efficiently optimize information distribution and mitigate the impact of N:M sparsity on LLM accuracy. Furthermore, many pruning works can also be generalized to semi-structured patterns. For example, SparseGPT~\cite{FrantarA23} and Wanda~\cite{sun2024a} also explore N:M sparsity of LLMs. SparseGPT~\cite{FrantarA23} employs block-wise weight partitioning, with each block containing M weights. It identifies and prunes N weights with the lowest reconstruction error(based on Hessian information), ensuring a sparsity ratio of N:M. This process iteratively prunes and updates model weights, addressing one block at a time until the desired sparsity level is achieved across the entire model. Wanda~\cite{sun2024a} achieves structured N:M pruning by dividing the weight matrix into groups of M consecutive weights and computing an importance score for each weight. The score is determined by the product of the weight's magnitude and the norm of the corresponding input activations. Within each weight group, the N weights with the highest scores are retained, while the rest are set to zero, thereby implementing structured N:M pruning. Furthermore, choosing the optimal pruning strategy is crucial for compatibility with the target hardware. For instance, ~\citet{ChoquetteGGSK21}  introduce the Ampere Tensor Core GPU architecture (e.g., A100 GPUs) and propose 2:4 fine-grained semi-structured sparsity to accelerate Sparse Neural Networks on this hardware. However, the current implementation of the Ampere architecture supports only the 2:4 ratio, leaving other ratios without acceleration.
+  
+
+\begin{remark}
+   LLMs often perform well on multiple tasks, which means they contain a multitude of parameters for various tasks. Dynamic  pruning~\cite{XiaWD20} methods can dynamically prune different parts of the model based on the current task's requirements to provide better performance on specific tasks. This helps strike a balance between performance and efficiency.
+\end{remark}
+\begin{remark}
+For PTQ and pruning, preparing a high-quality calibration dataset to assist in improving the performance of compressed LLMs is crucial. Specifically, ~\citet{abs-2311-09755} make a extensive empirical study on the effect of calibration data upon  model compression methods, and  find that the performance of downstream tasks can vary significantly depending on the calibration data selected. High-quality calibration data can improve the performance and accuracy of the compressed model, so careful selection and preparation of calibration data are necessary.    
+\end{remark}
+
+
+
+\section{Knowledge  Distillation}
+\label{sec:kd}
+Knowledge Distillation (KD)~\cite{HintonVD15} is a  technique aimed at transferring knowledge from a large and complex model (i.e., teacher model) to a smaller and simpler model (i.e., student model).  We classify these methods into two clear categories~\cite{gu2024minillm}: \textbf{Black-box KD}, where only the teacher's outputs are accessible, typically from closed-source LLMs, and \textbf{White-box KD}, where the teacher's parameters or output distribution are available, usually from open-source LLMs.
+
+% Due to the significant gap in capacity between student and teacher models, and considering that the  capabilities of teacher LLMs are distributed across a wide range of tasks, prior research~\cite{pmlr-v202-fu23d} has commonly attempted to distill specific abilities into student models to enhance their performance on particular tasks.
+
+\subsection{Black-box KD}
+\label{sec:black-box-kd}
+Black-box KD usually prompts the teacher LLM to generate a distillation dataset for fine-tune the student LM, thereby transfering capabilities from teacher LLM to the student LM.
+In Black-box KD, teacher LLMs such as ChatGPT (gpt-3.5-turbo) and GPT4~\cite{openai2024gpt4} are typically employed, while smaller LMs (SLMs), such as GPT-2~\cite{radford2019language}, T5~\cite{RaffelSRLNMZLL20}, FlanT5~\cite{abs-2210-11416}, and CodeT5~\cite{0034WJH21}, are commonly utilized as student LMs.  On the other hand, researchers find that LLMs have emergent abilities, which refers to a significant improvement in performance when the model reaches a certain scale, showcasing surprising capabilities. Lots of Black-box KD methods try to distill emergent abilities from LLMs to student LMs, and we introduce three commonly used emergent ability distillation methods: Chain-of-Thought (CoT) Distillation, In-Context Learning (ICL) Distillation,  and Instruction Following (IF) Distillation. 
+   
+
+\subsubsection{Chain-of-Thought Distillation} 
+\label{sec:CoTD}
+CoT~\cite{Wei0SBIXCLZ22,0002WSLCNCZ23} prompts LLMs to generate intermediate reasoning steps, enabling them to tackle complex reasoning tasks step by step. ~\citet{li2024explanations} and ~\citet{HsiehLYNFRKLP23} employ LLMs to prompt the generation of explanations and leverage a multi-task learning framework to bolster the reasoning capabilities of smaller models while enhancing their capacity for generating explanations.   
+~\citet{MagisterMAMS23} show that LLMs' reasoning capability can be transferred to SLMs via knowledge distillation, but there's a trade-off between model and dataset size in reasoning ability.  ~\citet{HoSY23} use zero-shot CoT techniques to prompt LLMs to generate diverse rationales to enrich the distillation dataset for the student models.    ~\citet{ShridharSS23} distill two student models: a problem decomposer and a subproblem solver, which the problem decomposer decomposes complex problems into a sequence of subproblems, and the subproblem solver solves these subproblems step by step. 
+~\citet{WangWLGYR23} incorporate contrastive decoding during rationale generation for teacher models and address shortcut issues by introducing a counterfactual reasoning objective during student model training. ~\citet{pmlr-v202-fu23d} demonstrate that increasing task-specific capabilities through distillation may inadvertently lead to reduced performance in solving generalized problems, and focus on improving mathematical capability of student LMs via distillation. PaD~\cite{abs-2305-13888} prompts LLMs to generate Program-of-Thought (PoT) rationales instead of Chain-of-Thought (CoT) rationales to construct distillation dataset, and fine-tunes SLMs with the distillation dataset. ~\citet{WangHLWSZHWDSZ23} establishes a multi-round interactive learning paradigm that enables student LMs to provide feedback to teacher LLMs during the distillation process, thereby obtaining tailored training data. Additionally, DRA introduces a self-reflection learning mechanism, allowing the student LMs to learn from their mistakes and enhance their reasoning abilities. ~\citet{LiYFPSWW024} finds that negative data generated from teacher LMs also has reasoning knowledge, and  guides student LMs to learn knowledge from both negative samples besides positive ones.
+
+\subsubsection{In-Context Learning Distillation}
+\label{sec:ICLD}
+ICL~\cite{abs-2301-00234,abs-2301-11916} employs structured prompts with task descriptions and examples for LLMs to learn new tasks without gradient updates. ~\citet{abs-2212-10670}  introduce a method called in-context learning distillation, which transfers in-context learning ability from LLMs to smaller models by combining in-context learning objectives with language modeling objectives. Specifically, it trains the student model to improve its generalization across various tasks by imitating the soft label predictions of the teacher model and the hard label ground truth values. Additionally, the method incorporates two few-shot learning paradigms: Meta In-context Tuning (Meta-ICT) and Multitask In-context Tuning (Multitask-ICT).   In Meta-ICT, the student model adapts to new tasks with in-context learning and guidance from the teacher. Conversely, Multitask-ICT treats all target tasks as training tasks, directly using examples from them in distillation. The outcomes show that Multitask-ICT is more effective, despite its increased computational requirements. AICD~\cite{liu2024learning}  leverages the autoregressive nature of LLMs to perform meta-teacher forcing on CoTs within the context, jointly optimizing the likelihood of all in-context CoTs, thereby distilling the capabilities of in-context learning and reasoning into smaller models.
+
+\subsubsection{Instruction Following Distillation}
+\label{sec:IFD}
+IF~\cite{Ouyang0JAWMZASR22,brooks2023instructpix2pix} aims to bolster the zero-shot ability of LLMs through fine-tuning using a collection of instruction-like prompt-response pairs. For instance, Lion~\cite{jiang-etal-2023-lion}  prompts the LLM to identify and generate the "hard" instructions, which are then utilized to enhance the student model's capabilities. LaMini-LM~\cite{wu-etal-2024-lamini}  develops an extensive collection of 2.58 million instructions, comprising both existing and newly generated instructions, and fine-tunes a diverse array of models by using these instructions. SELF-INSTRUCT~\cite{wang-etal-2023-self-instruct} uses student LMs themselves as teachers to generate instruction following dataset, and fine-tunes students themselves with the dataset. Selective Reflection-Tuning~\cite{abs-2402-10110} leverages the teacher LLMs to reflect on and improve existing data, while the student LMs assess and selectively incorporate these improvements, thereby increasing data quality and compatibility with the student LMs. 
+
+\begin{remark}
+   Black-Box Distillation uses the teacher model's outputs as supervision, but the teacher model's outputs may not cover all possible input scenarios. Thus, understanding how to handle a student model's generalization on unknown data and how to increase data diversity is an area that requires further investigation.
+\end{remark}
+
+% \item  \textcolor{red}{Black-Box Distillation transfers knowledge from the teacher model, but gaining a deeper understanding of the knowledge transfer process may help improve the method. In LLMs, designing new prompting strategy is a feasible scheme. For example, ~\citet{ShridharSS23} design a prompt to instruct LLMs to decouple a complex problem into several simple problems, and then train two distilled models: a problem decomposer and a subproblem solver to improve the performance of distillation.}
+
+\subsection{White-box KD}
+\label{sec:white-box-kd}
+White-box KD enables the student LM to gain a deeper understanding of the teacher LLM's internal structure and knowledge representations, often resulting in higher-level performance improvements.  An representative example is MINILLM~\cite{gu2024minillm}, which the first work to study distillation from the Open-source generative LLMs. MINILLM use a reverse Kullback-Leibler divergence objective, which is more suitable for KD on generative language models, to prevent the student model from overestimating the low-probability regions of the teacher distribution, and derives an effective optimization approach to learn the objective. Further, GKD~\cite{agarwal2024generalized} explores distillation from auto-regressive models, where generative language models are a subset. GKD  trains the student using self-generated outputs, incorporating teacher feedback, and allows flexibility in using different loss functions when the student cannot fully replicate the teacher's distribution. Different from the above works, which focus on learning the teacher distribution, TED~\cite{LiangZZHCZ23} proposes a task-aware layer-wise distillation method, which designs task-aware filters, which align the hidden representations of the teacher and student models at each intermediate layer, to reduce the knowledge gap between the student and teacher models.
+
+\begin{remark}
+  Although white-box distillation allows student LMs to learn the knowledge of teacher LLMs more deeply compared to black-box distillation, currently, open-source LLMs perform worse than closed-source ones, limiting the improvement of student LMs performance in white-box distillation. This is one of the barren factors hindering the development of white-box distillation. A feasible solution is to distill knowledge from closed-source LLMs to open-source LLMs through black-box distillation, and then use white-box distillation to transfer knowledge from open-source LLMs to student LLMs.
+\end{remark}
+\begin{remark}
+White-box distillation often involves understanding and utilizing the internal structure of LLMs, such as layer connections and parameter settings. A more in-depth exploration of different network structures and interactions between layers can improve the effectiveness of white-box distillation.    
+\end{remark}
+
+    
+\section{Low-Rank Factorization}
+\label{sec:lrf}
+Low-Rank Factorization~\cite{SrebroJ03} reduces a large matrix into smaller ones to save space and computational effort.  For example, it decomposes a large matrix $W$ into two small matrices $U$ and $V$ (i.e., $W \approx UV$), where $U$ is $m \times k$ and $V$ is $k \times n$, with $k$ much smaller than $m$ and $n$.  Recent works try to employ low-rank factorization to compress LLMs and achieve significant success in this regard. For example, LPLR~\cite{SahaSP23} compresses weight matrices of LLMs through randomized low-rank and low-precision factorization. Specifically, LPLR approximates the column space of the matrix using random sketching techniques, quantizes these columns, and then projects the original columns onto this quantized space to create two low-rank factors stored in low-precision.  ASVD~\cite{abs-2312-05821} finds that the activation distribution has an effect on the compression performance. To sovle the problem, ASVD proposes to scale the weight matrix with a diagonal matrix that contains scaling factors corresponding to the activation distribution of the input feature channels. Moreover, ASVD assigns the most suitable compression ratio to different layers by analyzing the singular values distribution in each layer's weight matrix, ensuring minimal loss of model performance during the compression process.   Furthermore,~\citet{sharma2024the} demonstrates that the performance of LLMs can be significantly improved by applying Layer-Selective Rank Reduction (LASER) to specific layers of Transformer models. LASER involves selectively reducing the rank higher-order components of weight matrices, which is shown to improve the model's handling of rare training data and its resistance to question paraphrasing. 
+
+
+
+
+
+% \begin{figure}[ht]
+%  \centering
+%  \includegraphics[width=\columnwidth]{kd.pdf}
+%  \caption{A brief classification of knowledge distillation for LLMs.}
+%  \label{kd}
+%  \end{figure}
+
+
+
+
+\section{Challenges and Future Directions} 
+\subsection{More Advanced Methods}
+The research on model compression techniques for LLMs is still in its early stages. These compressed LLMs, as demonstrated in prior studies \cite{FrantarA23,abs-2305-17888,HoSY23}, continue to exhibit a significant performance gap when compared to their uncompressed counterparts. By delving into more advanced model compression methods tailored for LLMs, we have the potential to enhance the performance of these uncompressed LLMs.
+ 
+\subsection{Scaling up Model Compression Methods from Other Models}
+In our paper, we introduce several representative model compression methods for LLMs. However, many classic model compression methods remain prevalent in traditional small models. For example, lottery tickets~\cite{FrankleC19} and parameter sharing~\cite{SavareseM19} are widely used model compression methods in small models. These methods still hold significant potential in the era of LLMs. Future work should focus on exploring how to extend these compression methods to LLMs to achieve further compression.
+
+\subsection{LLM Inference and Deployment}
+The efficiency of compressed LLMs during deployment is also a significant area for exploration. This involves multiple evaluation metrics, including arithmetic intensity, memory size, and throughput. Furthermore, we can use an analytical tool, the Roofline Model~\cite{WilliamsWP09}, to assess the resource efficiency of compressed LLMs on specific hardware. Evaluating the deployment efficiency of compressed LLMs on specific hardware can guide researchers in selecting and analyzing the advantages and disadvantages of various model compression methods and further optimizing these methods.
+
+\subsection{The Effect of Scaling Law}
+The scaling law~\cite{abs-2001-08361} underscores the significant impact of model size, dataset size, and compute resources on the performance of LLMs. However, the scaling law presents a fundamental challenge for LLM compression, i.e.,  there is a trade-off between model size and performance in compressed LLMs. Delving into the mechanisms and theories underpinning the scaling law is crucial for elucidating and potentially overcoming this limitation.
+
+\subsection{AutoML for LLM Compression}
+Existing compression techniques have made remarkable progress, but they still heavily depend on manual design. For instance, designing  appropriate student architectures for knowledge distillation requires a significant amount of human effort. To reduce this reliance on manual design, a feasible solution is to combine Automated Machine Learning (AutoML) techniques such as Meta-Learning~\cite{FinnAL17} and Neural Architecture Search (NAS)~\cite{ZophL17} with model compression. By combining with AutoML techniques, model compression can automatically select appropriate hyperparameters and  tailor  architectures and scales of compressed models,  thus minimizing human involvement and lowering the associated costs. Furthermore, AutoML can identify optimal model compression strategies tailored to specific task requirements, thereby further enhancing compression rates without compromising model performance.
+
+\subsection{Explainability of LLM Compression} 
+ Earlier research~\cite{StantonIKAW21,XuZG0MW21} has raised significant concerns regarding the explainability of model compression techniques applied to Pre-trained Language Models (PLMs). Notably, these same challenges extend to LLM compression methods as well. For example, CoT-distillation can enhance SLMs' reasoning performance, yet the mechanism through which it imparts CoT ability remains unclear. This challenge underscores the importance of integrating explainability with model compression approaches for the advancement of LLM compression applications. Explainability not only clarifies the changes and trade-offs in the compression process but also enhances efficiency and accuracy. Additionally, interpretability aids in evaluating the compressed model's performance to ensure it aligns with practical requirements.
+  
+
+
+% As LLM compression advances, there's a clear call for research into advanced methodologies specifically for LLMs, unlocking their potential across applications.
+ 
+\section{Conclusion}
+ In the survey, we have explored model compression techniques for LLMs. Our coverage spanned compression methods, metrics, and benchmark datasets. By diving into LLM compression, we've highlighted its challenges and opportunities.  This survey aims to be a valuable reference, providing insights into the current landscape and promoting ongoing exploration of this pivotal topic.
+
+\section*{Acknowledgments}
+We would like to thank the anonymous reviewers and the Action Editor for their valuable feedback and discussions. The work of Jian Li is supported partially by National Natural Science Foundation of China (No.\ 62106257). The work of Yong Liu is supported partially by National Natural Science Foundation of China (No.\ 62076234), Beijing Outstanding Young Scientist Program (No.\ BJJWZYJH012019100020098), the Unicom Innovation Ecological Cooperation Plan, and the CCF-Huawei Populus Grove Fund.
+
+\bibliography{tacl2021}
+\bibliographystyle{acl_natbib}
+
+
+
+\end{document}
+
+
